@@ -2,6 +2,6 @@
 /__pycache__/
 venv
 **/__pycache__/
-/models/
+/ia-models/
 /files/
 .env
