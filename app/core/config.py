@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # OUTPUT
     OUTPUT_DIR: str = Field(default="files", env="OUTPUT_DIR")
     
+    #LOGGING
+    LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -5,3 +5,10 @@ venv
 /ia-models/
 /files/
 .env
+/logs/
+
+# Base de datos SQLite
+*.db
+*.sqlite
+*.sqlite3
+sonara.db

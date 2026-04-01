@@ -1,5 +1,5 @@
 # app/core/logging.py
-import logging
+import logging as logging_module
 import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
@@ -10,15 +10,22 @@ DETAILED_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(linen
 SIMPLE_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-def setup_production_logging():
+def setup_logging():
     """Configuración de logging para producción"""
     
     # Crear directorio de logs si no existe
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
     
-    # Nivel según entorno
-    log_level = getattr(logging, settings.LOG_LEVEL.upper())
+    # Nivel según entorno con valor por defecto seguro
+    default_level = "INFO"
+    log_level_str = getattr(settings, 'LOG_LEVEL', default_level).upper()
+    
+    # Validar que sea un nivel válido de logging
+    if not hasattr(logging_module, log_level_str):
+        log_level_str = default_level
+    
+    log_level = getattr(logging_module, log_level_str)
     
     # Configuración principal
     logging_config = {
@@ -44,7 +51,7 @@ def setup_production_logging():
             "file_app": {
                 "class": "logging.handlers.RotatingFileHandler",
                 "filename": "logs/app.log",
-                "maxBytes": 10_485_760,  # 10 MB
+                "maxBytes": 10_485_760,
                 "backupCount": 5,
                 "formatter": "detailed",
                 "level": log_level,
@@ -55,7 +62,7 @@ def setup_production_logging():
                 "maxBytes": 10_485_760,
                 "backupCount": 5,
                 "formatter": "detailed",
-                "level": logging.ERROR,
+                "level": logging_module.ERROR,
             },
         },
         "loggers": {
@@ -85,8 +92,13 @@ def setup_production_logging():
     import logging.config
     logging.config.dictConfig(logging_config)
     
-    return logging.getLogger("app")
+    root_logger = logging_module.getLogger("app")
+    
+    if log_level_str != getattr(settings, 'LOG_LEVEL', default_level).upper():
+        root_logger.warning(f"LOG_LEVEL no válido, usando {default_level}")
+    else:
+        root_logger.info(f" Sistema de logging configurado - Nivel: {log_level_str}")
 
-def get_logger(name: str) -> logging.Logger:
+def get_logger(name: str) -> logging_module.Logger:
     """Obtener logger para módulos específicos"""
-    return logging.getLogger(f"app.{name}")
+    return logging_module.getLogger(f"app.{name}")

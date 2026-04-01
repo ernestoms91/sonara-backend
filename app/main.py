@@ -1,37 +1,42 @@
-import logging
-import app.core.logging
+# main.py
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routers.info_router import router as info_router
 from app.core.config import settings
-from app.core.model import TTSModel 
+from app.core.model import TTSModel
+from app.core.logging import get_logger, setup_logging
 
-logger = logging.getLogger(__name__)
+# Configurar logging al inicio
+setup_logging()
+
+# Crear logger para este módulo
+logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("🚀 Iniciando servidor...")
-    print(f"✅ Iniciando")
+    # Startup - SIN EMOJIS
+    logger.info(">>> Iniciando servidor...")
+    logger.info(f"Proyecto: {settings.PROJECT_NAME}")
+    
     # Cargar modelo TTS
     try:
         model, device = TTSModel.load()
-        logger.info("✅ Modelo TTS cargado correctamente")
-        # Opcional: guardar en app.state para acceder desde los endpoints
+        logger.info(">>> Modelo TTS cargado correctamente")
+        logger.debug(f"Dispositivo: {device}")
         app.state.model = model
         app.state.device = device
     except Exception as e:
-        logger.error(f"❌ Error cargando modelo TTS: {e}")
+        logger.error(f"Error cargando modelo TTS: {e}", exc_info=True)
         raise
     
-    yield  # Aquí corre la aplicación
+    yield
     
     # Shutdown
-    logger.info("🛑 Cerrando servidor...")
-    # Opcional: descargar modelo para liberar memoria
-    TTSModel.unload()  # Si agregaste el método unload
-    logger.info("✅ Modelo descargado")
+    logger.info("<<< Cerrando servidor...")
+    if hasattr(TTSModel, 'unload'):
+        TTSModel.unload()
+        logger.info("Modelo descargado")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -50,3 +55,6 @@ app.add_middleware(
 )
 
 app.include_router(info_router, prefix="/api/v1")
+
+logger.info(f"API {settings.PROJECT_NAME} configurada correctamente")
+logger.info(f"Nivel de logging: {settings.LOG_LEVEL}")

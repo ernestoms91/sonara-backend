@@ -1,85 +1,96 @@
-# backend/app/core/model.py
+# app/core/model.py
+import os
 import torch
-import logging
-from pathlib import Path
-from typing import Tuple, Optional
+from app.core.logging import get_logger
 from app.core.config import settings
-from qwen_tts import Qwen3TTSModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class TTSModel:
-    _model: Optional[Qwen3TTSModel] = None
-    _device: Optional[str] = None
+    _model = None
+    _device = None
     
     @classmethod
-    def _get_device(cls) -> str:
-        """Configurar device basado en settings"""
-        if settings.DEVICE == "cuda" and torch.cuda.is_available():
-            device = "cuda:0"
-            logger.info(f"✅ GPU: {torch.cuda.get_device_name(0)}")
-            logger.info(f"✅ Memoria: {round(torch.cuda.get_device_properties(0).total_memory / 1e9, 2)} GB")
-        elif settings.DEVICE == "mps" and torch.backends.mps.is_available():
-            device = "mps"
-            logger.info("✅ MPS disponible")
+    def _get_device(cls):
+        """Determinar dispositivo (CPU/CUDA)"""
+        device = settings.DEVICE.lower()
+        
+        if device == "cuda" and torch.cuda.is_available():
+            logger.info("Usando GPU (CUDA)")
+            return "cuda"
         else:
-            device = "cpu"
-            logger.info("✅ Usando CPU")
-        
-        return device
+            logger.info("Usando CPU")
+            return "cpu"
     
     @classmethod
-    def _get_model_path(cls) -> str:
-        """Obtener ruta del modelo (local o HF)"""
-        if not settings.MODEL_PATH:
-            return settings.MODEL_NAME
+    def _get_model_path(cls):
+        """Construir la ruta completa del modelo"""
+        # Combinar MODEL_PATH y MODEL_NAME
+        model_path = os.path.join(settings.MODEL_PATH, settings.MODEL_NAME)
         
-        model_path = Path(settings.MODEL_PATH) / settings.MODEL_NAME
-        if model_path.exists():
-            return str(model_path)
+        # Si la ruta existe, usarla
+        if os.path.exists(model_path):
+            logger.debug(f"Usando modelo local: {model_path}")
+            return model_path
         
-        logger.warning(f"⚠️ Ruta local no encontrada: {model_path}, usando {settings.MODEL_NAME}")
+        # Si no existe localmente, usar el nombre directamente (Hugging Face)
+        logger.debug(f"Modelo no encontrado localmente, usando Hugging Face: {settings.MODEL_NAME}")
         return settings.MODEL_NAME
     
     @classmethod
-    def load(cls) -> Tuple[Qwen3TTSModel, str]:
-        """Cargar modelo TTS"""
-        if cls._model is None:
-            try:
-                cls._device = cls._get_device()
-                model_path = cls._get_model_path()
-                
-                logger.info(f"📂 Cargando modelo desde: {model_path}")
-                
-                cls._model = Qwen3TTSModel.from_pretrained(
-                    model_path,
-                    device_map=cls._device,
-                    dtype=torch.bfloat16,
-                    attn_implementation="flash_attention_2" if cls._device == "cuda" else "eager",
-                )
-                
-                logger.info("✅ Modelo cargado exitosamente!")
-                
-            except ImportError as e:
-                logger.critical(f"❌ qwen_tts no instalado: {e}")
-                raise
-            except torch.cuda.OutOfMemoryError as e:
-                logger.critical(f"❌ Memoria GPU insuficiente: {e}")
-                raise
-            except Exception as e:
-                logger.critical(f"❌ Error cargando modelo: {e}")
-                raise
+    def load(cls):
+        """Cargar modelo Qwen3-TTS Base (voice clone)"""
+        from qwen_tts import Qwen3TTSModel
         
-        return cls._model, cls._device
+        if cls._model is not None:
+            logger.debug("Modelo ya estaba cargado")
+            return cls._model, cls._device
+        
+        try:
+            model_path = cls._get_model_path()
+            device = cls._get_device()
+            
+            logger.info(f"Cargando modelo desde: {model_path}")
+            
+            # Configuración según dispositivo
+            if device == "cuda":
+                dtype = torch.bfloat16
+                attn = "flash_attention_2"
+            else:
+                dtype = torch.float32
+                attn = None
+            
+            cls._model = Qwen3TTSModel.from_pretrained(
+                model_path,
+                device_map=device,
+                dtype=dtype,
+                attn_implementation=attn,
+            )
+            cls._device = device
+            
+            logger.info("Modelo cargado exitosamente")
+            return cls._model, cls._device
+            
+        except Exception as e:
+            logger.error(f"Error cargando modelo: {e}", exc_info=True)
+            raise
     
     @classmethod
     def unload(cls):
-        """Liberar recursos del modelo"""
+        """Descargar modelo para liberar memoria"""
         if cls._model is not None:
+            logger.info("Descargando modelo...")
             del cls._model
             cls._model = None
             
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            logger.info("🗑️ Modelo descargado")
+            logger.info("Modelo descargado")
+    
+    @classmethod
+    def get_model(cls):
+        """Obtener la instancia del modelo"""
+        if cls._model is None:
+            cls.load()
+        return cls._model, cls._device
