@@ -6,7 +6,7 @@ from pathlib import Path
 
 class Settings(BaseSettings):
     # Base de datos
-    DATABASE_URL: str = Field(..., env="DATABASE_URL")
+    DATABASE_URL: str = Field(default="sqlite:///./sonara.db", env="DATABASE_URL")
     
     # JWT
     JWT_SECRET: str = Field(..., env="JWT_SECRET", min_length=32)

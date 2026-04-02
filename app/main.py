@@ -1,8 +1,10 @@
 # main.py
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from app.api.errors import http_exception_handler, general_exception_handler
 from app.api.routers.info_router import router as info_router
+from app.api.routers.tts_router import router as tts_router
 from app.core.config import settings
 from app.core.model import TTSModel
 from app.core.logging import get_logger, setup_logging
@@ -21,10 +23,9 @@ async def lifespan(app: FastAPI):
     
     # Cargar modelo TTS (se guarda en TTSModel._model automáticamente)
     try:
-        model, device = TTSModel.load()
+        _, device = TTSModel.load()
         logger.info(">>> Modelo TTS cargado correctamente")
         logger.debug(f"Dispositivo: {device}")
-        # ✅ No guardar en app.state - el singleton ya mantiene el modelo
     except Exception as e:
         logger.error(f"Error cargando modelo TTS: {e}", exc_info=True)
         raise
@@ -53,7 +54,11 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
+
 app.include_router(info_router, prefix="/api/v1")
+app.include_router(tts_router, prefix="/api/v1")
 
 logger.info(f"API {settings.PROJECT_NAME} configurada correctamente")
 logger.info(f"Nivel de logging: {settings.LOG_LEVEL}")
