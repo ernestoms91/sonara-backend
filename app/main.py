@@ -15,17 +15,16 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup - SIN EMOJIS
+    # Startup
     logger.info(">>> Iniciando servidor...")
     logger.info(f"Proyecto: {settings.PROJECT_NAME}")
     
-    # Cargar modelo TTS
+    # Cargar modelo TTS (se guarda en TTSModel._model automáticamente)
     try:
         model, device = TTSModel.load()
         logger.info(">>> Modelo TTS cargado correctamente")
         logger.debug(f"Dispositivo: {device}")
-        app.state.model = model
-        app.state.device = device
+        # ✅ No guardar en app.state - el singleton ya mantiene el modelo
     except Exception as e:
         logger.error(f"Error cargando modelo TTS: {e}", exc_info=True)
         raise
