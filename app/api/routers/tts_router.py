@@ -1,7 +1,7 @@
 # app/api/routers/tts_router.py
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
-from app.api.deps import ModelDep, DeviceDep
+from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form
+from typing import Optional
+from app.api.deps import DBSession, ModelDep
 from app.services.tts_service import TTSService
 from app.core.logging import get_logger
 
@@ -9,88 +9,40 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/tts", tags=["TTS"])
 
-
-class TTSRequest(BaseModel):
-    """Solicitud de síntesis de voz"""
-    text: str = Field(..., min_length=1, max_length=1000, description="Texto a sintetizar")
-    speaker_id: int = Field(default=0, ge=0, description="ID del locutor")
-    save_file: bool = Field(default=True, description="Guardar audio en archivo")
-
-
-class TTSResponse(BaseModel):
-    """Respuesta de síntesis de voz"""
-    success: bool
-    text: str
-    speaker_id: int
-    device: str
-    file: str = None
-    duration_estimate: float
-
-
-@router.post("/synthesize", response_model=TTSResponse, status_code=status.HTTP_200_OK)
-async def synthesize(
-    request: TTSRequest,
+@router.post(
+    "/create-profile",
+    response_model=dict,
+    status_code=status.HTTP_201_CREATED,
+    summary="Crear perfil de voz clonada",
+)
+async def create_profile(
+    db: DBSession,
     model: ModelDep,
-    device: DeviceDep
-) -> TTSResponse:
-    """
-    Sintetizar texto a voz
+    name: str = Form(..., min_length=1, max_length=50),
+    ref_text: str = Form(..., min_length=1, max_length=500),
+    audio_file: UploadFile = File(...),
+    language: str = Form(default="Spanish"),
+    user_id: Optional[int] = Form(default=None),
+) -> dict:
     
-    - **text**: Texto a convertir a voz
-    - **speaker_id**: ID del locutor (default: 0)
-    - **save_file**: Guardar audio en archivo (default: true)
-    """
-    try:
-        logger.info(f"Síntesis solicitada: {request.text[:50]}...")
-        
-        # Estimar duración
-        duration = TTSService.estimate_duration(request.text)
-        
-        if request.save_file:
-            # Sintetizar y guardar en archivo
-            result = TTSService.synthesize_and_save(
-                text=request.text,
-                model=model,
-                device=device,
-                speaker_id=request.speaker_id
-            )
-        else:
-            # Solo sintetizar sin guardar
-            result = TTSService.synthesize(
-                text=request.text,
-                model=model,
-                device=device,
-                speaker_id=request.speaker_id
-            )
-        
-        return TTSResponse(
-            success=result["success"],
-            text=result["text"],
-            speaker_id=result["speaker_id"],
-            device=result["device"],
-            file=result.get("file"),
-            duration_estimate=duration
-        )
-        
-    except ValueError as e:
-        logger.warning(f"Validación fallida: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error en síntesis: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error procesando síntesis de voz"
-        )
-
-
-@router.get("/health", status_code=status.HTTP_200_OK)
-async def health(model: ModelDep, device: DeviceDep):
-    """Verificar estado del modelo TTS"""
+    audio_bytes = await audio_file.read()
+    
+    service = TTSService(db, model)
+    profile = service.create_profile(
+        name=name,
+        ref_text=ref_text,
+        audio_bytes=audio_bytes,
+        filename=audio_file.filename,
+        content_type=audio_file.content_type,
+        language=language,
+        user_id=user_id
+    )
+    
     return {
-        "status": "ok",
-        "model_loaded": model is not None,
-        "device": device
+        "success": True,
+        "profile_id": profile.id,
+        "profile_uuid": profile.profile_id,
+        "name": profile.name,
+        "language": profile.language,
+        "message": "Perfil de voz creado exitosamente"
     }

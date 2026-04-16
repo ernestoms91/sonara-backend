@@ -50,6 +50,11 @@ try:
     output_path = Path(settings.OUTPUT_DIR)
     output_path.mkdir(parents=True, exist_ok=True)
     logging.info(f"Carpeta de salida: {output_path.absolute()}")
+    
+    # Crear subcarpeta para perfiles dentro de OUTPUT_DIR
+    profiles_path = output_path / "profiles"
+    profiles_path.mkdir(parents=True, exist_ok=True)
+    logging.info(f"Carpeta de perfiles: {profiles_path.absolute()}")
 
 except Exception as e:
     logging.critical(f"Error de configuración: {e}")

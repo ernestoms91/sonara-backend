@@ -6,6 +6,7 @@ venv
 /files/
 .env
 /logs/
+/audio/
 
 # Base de datos SQLite
 *.db

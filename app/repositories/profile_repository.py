@@ -3,6 +3,7 @@ from sqlmodel import Session, select
 from typing import List, Optional
 from app.models.profile_model import Profile
 from app.core.logging import get_logger
+from app.schemas.profile import ProfileCreate
 
 logger = get_logger(__name__)
 
@@ -43,25 +44,16 @@ class ProfileRepository:
     # ============================================
     # CREATE PROFILE
     # ============================================
-    def create(self, profile: Profile) -> Profile:
+    def create(self, profile_data: ProfileCreate, voice_clone_prompt: bytes) -> Profile:
         """Guardar un perfil en la base de datos"""
+        profile = Profile(
+            name=profile_data.name,
+            language=profile_data.language,
+            ref_text=profile_data.ref_text,
+        )
         self.db.add(profile)
         self.db.commit()
         self.db.refresh(profile)
-        
-        logger.info(f"Perfil creado: ID={profile.id}, name={profile.name}")
-        return profile
-    
-    # ============================================
-    # UPDATE PROFILE
-    # ============================================
-    def update(self, profile: Profile) -> Profile:
-        """Actualizar un perfil existente"""
-        self.db.add(profile)
-        self.db.commit()
-        self.db.refresh(profile)
-        
-        logger.info(f"Perfil actualizado: ID={profile.id}")
         return profile
     
     # ============================================

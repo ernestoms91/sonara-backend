@@ -1,18 +1,17 @@
 # models/profile.py
-import uuid
 from sqlmodel import SQLModel, Field
+from typing import Optional
+from datetime import datetime, timezone
 
 
 class Profile(SQLModel, table=True):
     __tablename__ = "profile"
-    id: int = Field(default=None, primary_key=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True, min_length=1, max_length=50)
     active: bool = Field(default=False)
-    profile_id: str = Field(min_length=1, max_length=50)
-    
-
-class ProfileCreate(SQLModel):
-    name: str = Field(..., min_length=1, description="Nombre del narrador")
-    language: str = Field(default="Spanish", description="Idioma: Auto, Chinese, English, Spanish...")
-    ref_text: str= Field(..., description="Transcripción del audio de referencia")
-    profile_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="UUID único del perfil")
+    hours_ready : bool = Field(default=False)
+    minutes_ready : bool = Field(default=False)
+    connectors_ready  : bool = Field(default=False)
+    language: str = Field(default="Spanish")
+    ref_text: str = Field(default="")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

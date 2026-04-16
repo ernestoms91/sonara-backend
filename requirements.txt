@@ -24,6 +24,7 @@ flatbuffers==25.12.19
 fsspec==2026.3.0
 gradio==6.10.0
 gradio_client==2.4.0
+greenlet==3.4.0
 groovy==0.1.2
 h11==0.16.0
 hf-gradio==0.3.0
@@ -84,6 +85,8 @@ six==1.17.0
 soundfile==0.13.1
 sox==1.5.0
 soxr==1.0.0
+SQLAlchemy==2.0.49
+sqlmodel==0.0.38
 starlette==0.52.1
 sympy==1.14.0
 threadpoolctl==3.6.0

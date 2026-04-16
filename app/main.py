@@ -1,11 +1,13 @@
 # main.py
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.errors import http_exception_handler, general_exception_handler
+from app.api.errors import http_exception_handler, general_exception_handler, validation_exception_handler
 from app.api.routers.info_router import router as info_router
-from app.api.routers.tts_router import router as tts_router
+from app.api.routers.profile_router import router as tts_router
 from app.core.config import settings
+from app.core.database import init_db
 from app.core.model import TTSModel
 from app.core.logging import get_logger, setup_logging
 
@@ -20,6 +22,10 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info(">>> Iniciando servidor...")
     logger.info(f"Proyecto: {settings.PROJECT_NAME}")
+    
+    # INICIALIZAR BASE DE DATOS (crear tablas si no existen)
+    init_db()
+    logger.info(">>> Base de datos inicializada")
     
     # Cargar modelo TTS (se guarda en TTSModel._model automáticamente)
     try:
@@ -55,6 +61,7 @@ app.add_middleware(
 )
 
 app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
 
 app.include_router(info_router, prefix="/api/v1")
