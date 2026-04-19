@@ -1,8 +1,6 @@
-# app/api/routers/tts_router.py
-from typing import Optional
-
+# app/api/routers/profile_router.py
 from fastapi import APIRouter, status, UploadFile, File, Form, Path
-from app.api.deps import TTSServiceDep
+from app.api.deps import ProfileServiceDep
 from app.schemas.common import CommonResponse
 from app.core.logging import get_logger
 from app.schemas.profile import ProfileResponse
@@ -19,7 +17,7 @@ router = APIRouter(prefix="/profile", tags=["PROFILE"])
     summary="Crear perfil de voz clonada",
 )
 async def create_profile(
-    service: TTSServiceDep,
+    profile_service: ProfileServiceDep,
     name: str = Form(..., min_length=1, description="Nombre del narrador"),
     ref_text: str = Form(..., min_length=1,
                          description="Texto de referencia para la voz"),
@@ -29,7 +27,7 @@ async def create_profile(
     logger.info(f"Recibida solicitud para crear perfil: {name}")
     audio_bytes = await audio_file.read()
 
-    profile = service.create_profile(
+    profile = profile_service.create_profile(
         name=name,
         ref_text=ref_text,
         audio_bytes=audio_bytes,
@@ -45,45 +43,18 @@ async def create_profile(
 
 
 @router.post(
-    "/{profile_id}/generate-hours",
+    "/{profile_id}/generate",
     response_model=CommonResponse,
-    summary="Generar los 12 audios de horas para un perfil",
+    status_code=status.HTTP_201_CREATED,
+    summary="Generar audio a partir de texto usando un perfil de voz clonada",
 )
-def generate_hours(
-    service: TTSServiceDep,
-    profile_id: int = Path(..., ge=1, description="ID del perfil"),
+async def generate_audio(
+    profile_service: ProfileServiceDep,
+    text: str = Form(..., min_length=1, max_length=1000,
+                     description="Texto a sintetizar"),
+    profile_id: int = Path(..., gt=0, description="ID del perfil de voz clonada"),
 ) -> CommonResponse:
-    service.pre_generate_hours(profile_id)
+    profile_service.generate_audio_by_profile(profile_id=profile_id, text=text)
     return CommonResponse.success(
-        message=f"Audios de horas generados correctamente"
-    )
-
-
-@router.post(
-    "/generar",
-    response_model=CommonResponse,
-    summary="Generar audio a partir de un perfil",
-)
-async def synthesize(
-    service: TTSServiceDep,
-    profile_id: str = Form(...,
-                           description="ID del perfil a usar para la síntesis"),
-    text: str = Form(..., min_length=1, description="Texto a sintetizar"),
-    language: Optional[str] = Form(
-        default="Spanish", description="Idioma del texto a sintetizar")
-) -> CommonResponse:  # ✅ Tipado correcto
-    audio_bytes = service.synthesize_with_profile(
-        profile_id=profile_id,
-        text=text,
-        language=language or "Spanish"
-    )
-
-    # ✅ Devuelve CommonResponse consistente
-    return CommonResponse.success(
-        message="Audio creado exitosamente",
-        # data={
-        #     "audio_base64": audio_bytes.hex(),  # O como manejes el audio
-        #     "profile_id": profile_id,
-        #     "text_length": len(text)
-        # }
+        message="Audio generated successfully",
     )

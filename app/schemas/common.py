@@ -12,6 +12,11 @@ class CommonResponse(BaseModel, Generic[T]):
     data: T | None = None
     timestamp: datetime  = Field(default_factory=lambda: datetime.now(timezone.utc))
     
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+    
     @classmethod
     def success(cls, message: str, data: T | None = None):
         return cls(ok=True, message=message, data=data)

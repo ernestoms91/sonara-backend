@@ -1,13 +1,24 @@
+# app/api/deps/services.py
 from typing import Annotated
 from fastapi import Depends
+from app.services.profile_service import ProfileService
 from app.services.tts_service import TTSService
 from app.api.deps.db import DBSession
 from app.api.deps.model import ModelDep
 
+
 def get_tts_service(
-    db: DBSession,
     model_service: ModelDep
 ) -> TTSService:
-    return TTSService(db, model_service)
+    return TTSService(model_service)
 
 TTSServiceDep = Annotated[TTSService, Depends(get_tts_service)]
+
+
+def get_profile_service(
+    db: DBSession,
+    tts_service: TTSServiceDep
+) -> ProfileService:
+    return ProfileService(db, tts_service)  # 
+
+ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]

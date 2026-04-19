@@ -2,12 +2,15 @@
 from sqlmodel import SQLModel, Field
 from typing import Optional
 from datetime import datetime, timezone
+import uuid
 
 
 class Profile(SQLModel, table=True):
     __tablename__ = "profile"
     id: Optional[int] = Field(default=None, primary_key=True)
+    folder_id: str = Field(unique=True, index=True)
     name: str = Field(index=True, min_length=1, max_length=50)
+    model_type: str = Field(min_length=1, max_length=50)
     active: bool = Field(default=False)
     hours_ready : bool = Field(default=False)
     minutes_ready : bool = Field(default=False)

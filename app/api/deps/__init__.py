@@ -1,11 +1,12 @@
 from .db import DBSession
 from .model import ModelDep
 from .device import DeviceDep
-from .services import TTSServiceDep
+from .services import TTSServiceDep, ProfileServiceDep
 
 __all__ = [
     "DBSession",
     "ModelDep", 
     "DeviceDep",
-    "TTSServiceDep"
+    "TTSServiceDep",
+    "ProfileServiceDep"
 ]

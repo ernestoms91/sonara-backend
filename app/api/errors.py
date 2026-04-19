@@ -3,7 +3,7 @@ from fastapi import Request, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from app.core.logging import get_logger
-from app.schemas.common import CommonResponse  # ← Importas tu schema
+from app.schemas.common import CommonResponse
 
 logger = get_logger(__name__)
 
@@ -22,7 +22,7 @@ def http_exception_handler(request: Request, exc: HTTPException):
     
     return JSONResponse(
         status_code=exc.status_code,
-        content=response.model_dump()  # ← Convierte a JSON
+        content=response.model_dump(mode='json')  # ← Convierte a JSON
     )
 
 
@@ -41,7 +41,7 @@ def validation_exception_handler(request: Request, exc: RequestValidationError):
     
     return JSONResponse(
         status_code=422,
-        content=response.model_dump()
+        content=response.model_dump(mode='json')
     )
 
 
@@ -59,5 +59,22 @@ def general_exception_handler(request: Request, exc: Exception):
     
     return JSONResponse(
         status_code=500,
-        content=response.model_dump()
+        content=response.model_dump(mode='json')
+    )
+
+def value_error_handler(request: Request, exc: ValueError):
+    """Maneja específicamente ValueError (errores de lógica de negocio)"""
+    logger.warning(f"ValueError en {request.url}: {exc}")
+    
+    response = CommonResponse.fail(
+        message=str(exc),
+        data={
+            "path": str(request.url.path),
+            "error_type": "ValueError"
+        }
+    )
+    
+    return JSONResponse(
+        status_code=400,  # Bad Request
+        content=response.model_dump(mode='json')
     )

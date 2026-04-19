@@ -1,4 +1,5 @@
 # app/repositories/profile_repository.py
+from cffi import model
 from sqlmodel import Session, select
 from typing import List, Optional
 from app.models.profile_model import Profile
@@ -50,6 +51,9 @@ class ProfileRepository:
             name=profile_data.name,
             language=profile_data.language,
             ref_text=profile_data.ref_text,
+            model_type=profile_data.model_type,
+            folder_id=profile_data.folder_id
+            
         )
         self.db.add(profile)
         self.db.commit()
@@ -95,3 +99,14 @@ class ProfileRepository:
     def exists_by_profile_id(self, profile_id: str) -> bool:
         """Verificar si existe un perfil con ese profile_id"""
         return self.get_by_profile_id(profile_id) is not None
+    
+    
+    # ============================================
+    # UPDATE HOURS READY
+    # ============================================
+
+    def update_hours_ready(self, profile: Profile, hours_ready: bool) -> None:
+        """Actualiza hours_ready de un perfil"""
+        profile.hours_ready = hours_ready
+        self.db.commit()
+        self.db.refresh(profile)
