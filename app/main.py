@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.errors import http_exception_handler, general_exception_handler, validation_exception_handler, value_error_handler
+from app.api.routers.audio_router import router as audio_router
 from app.api.routers.info_router import router as info_router
 from app.api.routers.profile_router import router as tts_router
 from app.core.config import settings
@@ -65,6 +66,7 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
 app.add_exception_handler(ValueError, value_error_handler)
 
+app.include_router(audio_router, prefix="/api/v1")
 app.include_router(info_router, prefix="/api/v1")
 app.include_router(tts_router, prefix="/api/v1")
 

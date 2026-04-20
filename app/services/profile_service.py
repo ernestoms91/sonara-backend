@@ -22,7 +22,6 @@ class ProfileService:
         self.db = db
         self.tts_service = tts_service
         self.profiles_base_dir = Path(settings.OUTPUT_DIR) / "profiles"
-        self.audios_base_dir = Path(settings.OUTPUT_DIR) / "generated"
 
     def create_profile(
         self,
@@ -99,83 +98,3 @@ class ProfileService:
         finally:
             if temp_path and Path(temp_path).exists():
                 Path(temp_path).unlink(missing_ok=True)
-
-    def generate_audio_by_profile(self, profile_id: int, text: str) -> bytes:
-        profile = self.repo.get_by_id(profile_id)
-        if not profile:
-            raise ValueError(f"Profile with ID {profile_id} not found")
-
-        if not profile.active:
-            raise ValueError(f"Profile with ID {profile_id} is not active yet")
-
-        if profile.model_type != settings.MODEL_NAME:
-            raise ValueError(
-                f"Profile with ID {profile_id} is not compatible with the current model")
-
-        prompt_path = self.profiles_base_dir / \
-            profile.folder_id / f"{profile.name.lower()}.pt"
-
-        if not prompt_path.exists():
-            raise FileNotFoundError(
-                f"Prompt file not found for profile ID {profile_id}")
-
-        prompt = self.tts_service.load_prompt(str(prompt_path))
-
-        audio , sample_rate = self.tts_service.synthesize(
-            prompt=prompt,
-            text=text
-        )
-
-        return self._save_generated_audio(
-            profile_id=profile_id,
-            profile_name=profile.name,
-            text=text,
-            audio=audio,
-            sample_rate=sample_rate
-        )
-
-
-    def _save_generated_audio(
-        self,
-        profile_id: int,
-        profile_name: str,
-        text: str,
-        audio,
-        sample_rate: int
-    ) -> dict:
-        """
-        Guarda el audio generado en la carpeta generated
-        """
-        # Crear nombre de archivo único
-        import time
-        timestamp = int(time.time())
-        # Limpiar el texto para el nombre del archivo (primeros 50 caracteres)
-        clean_text = "".join(
-            c for c in text[:50] if c.isalnum() or c in " ._-").strip()
-        if not clean_text:
-            clean_text = "audio"
-
-        filename = f"{profile_name}_{clean_text}_{timestamp}.wav"
-
-        # Crear la carpeta si no existe
-        self.audios_base_dir.mkdir(parents=True, exist_ok=True)
-
-        # Ruta completa del archivo
-        audio_path = self.audios_base_dir / filename
-
-        # Guardar el archivo de audio
-        sf.write(audio_path, audio, sample_rate)
-        logger.info(f"Audio guardado en: {audio_path}")
-
-        # También devolver los bytes para compatibilidad con la API
-        audio_buffer = io.BytesIO()
-        sf.write(audio_buffer, audio, sample_rate, format='wav')
-        audio_bytes = audio_buffer.getvalue()
-
-        return {
-            "audio_bytes": audio_bytes,
-            "audio_path": str(audio_path),
-            "filename": filename,
-            "sample_rate": sample_rate,
-            "duration": len(audio) / sample_rate if audio is not None else 0
-        }

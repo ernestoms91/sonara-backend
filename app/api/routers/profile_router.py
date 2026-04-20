@@ -40,21 +40,5 @@ async def create_profile(
         message="Profile created successfully",
         data=ProfileResponse.model_validate(profile)
     )
+    
 
-
-@router.post(
-    "/{profile_id}/generate",
-    response_model=CommonResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Generar audio a partir de texto usando un perfil de voz clonada",
-)
-async def generate_audio(
-    profile_service: ProfileServiceDep,
-    text: str = Form(..., min_length=1, max_length=1000,
-                     description="Texto a sintetizar"),
-    profile_id: int = Path(..., gt=0, description="ID del perfil de voz clonada"),
-) -> CommonResponse:
-    profile_service.generate_audio_by_profile(profile_id=profile_id, text=text)
-    return CommonResponse.success(
-        message="Audio generated successfully",
-    )
