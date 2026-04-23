@@ -1,4 +1,5 @@
 # main.py
+from fastapi_pagination import add_pagination
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -52,6 +53,8 @@ app = FastAPI(
         "persistAuthorization": True
     }
 )
+
+add_pagination(app)
 
 app.add_middleware(
     CORSMiddleware,

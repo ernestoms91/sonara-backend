@@ -9,7 +9,7 @@ from sqlmodel import Session
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.generated_audio_model import GeneratedAudio
-from app.repositories.audio_repository import AudioRepository
+from app.repositories.generated_audio_repository import AudioRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.services.tts_service import TTSService
 

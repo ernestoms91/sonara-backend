@@ -1,5 +1,6 @@
 # app/services/tts_service.py
 import io
+import time
 import torch
 import soundfile as sf
 from pathlib import Path
@@ -46,7 +47,8 @@ class TTSService:
             bytes: Audio en formato WAV
         """
         logger.info(f"Sintetizando: '{text}'")
-
+        total_start = time.time()
+        t1 = time.time()
         # Configurar device
         if torch.cuda.is_available():
             autocast_device = "cuda"
@@ -56,6 +58,7 @@ class TTSService:
             dtype = torch.float32
 
         # Generar audio
+        t2 = time.time()
         with torch.no_grad(), torch.amp.autocast(autocast_device, dtype=dtype):
             wavs, sample_rate = self.model.generate_voice_clone(
                 text=text,
@@ -67,6 +70,7 @@ class TTSService:
                 top_p=0.9,
                 repetition_penalty=1.0,
             )
+        logger.info(f"Generación modelo: {time.time() - t2:.2f}s")
 
         # Convertir a numpy
         audio = wavs[0] if isinstance(wavs, list) else wavs
