@@ -105,3 +105,98 @@ async def get_audios_paginated(
             "pages": result["pages"]
         }
     )
+
+
+@router.get(
+    "/inactive",
+    response_model=CommonResponse,
+    summary="Obtener lista paginada de audios inactivos",
+    description="Obtiene todos los audios inactivos",
+)
+async def get_audios_paginated(
+    audio_service: AudioServiceDep,
+    page: int = Query(
+        1, ge=1, description="Número de página (empieza en 1)"),
+    size: int = Query(
+        50, ge=1, le=100, description="Cantidad de items por página (máx 100)"),
+) -> CommonResponse:
+    """
+    Obtiene todos los audios inactivos paginados con nombre del perfil.
+
+    - **page**: Número de página (default: 1)
+    - **size**: Items por página (default: 50, máx: 100)
+    """
+    logger.info(f"GET /audio/audios - page={page}, size={size}")
+
+    result = audio_service.get_audios_paginated(
+        page=page, size=size, actives=False)
+
+    return CommonResponse.success(
+        message="Inactive audios retrieved successfully",
+        data={
+            "items": result["items"],
+            "total": result["total"],
+            "page": result["page"],
+            "size": result["size"],
+            "pages": result["pages"]
+        }
+    )
+
+
+@router.delete(
+    "/{audio_id}",
+    response_model=CommonResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Desactivar un audio (soft delete)",
+    description="Marca un audio como inactivo (active=False) sin eliminarlo físicamente",
+)
+async def soft_delete_audio(
+    audio_service: AudioServiceDep,
+    audio_id: str = Path(..., description="ID del audio a desactivar"),
+) -> CommonResponse:
+    """
+    Desactiva un audio cambiando su estado active a False.
+    El audio no se elimina físicamente ni de la base de datos ni del sistema de archivos.
+    """
+
+    result = audio_service.soft_delete_audio(audio_id=audio_id)
+
+    logger.info(f"DELETE /audio/{audio_id} - Soft delete")
+
+    return CommonResponse.success(
+        message=result["message"],
+        data={
+            "audio_id": result["audio_id"],
+            "profile_id": result["profile_id"],
+            "profile_name": result["profile_name"]
+        }
+    )
+
+
+@router.post(
+    "/activate/{audio_id}",
+    response_model=CommonResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Activa un audio",
+    description="Activa un audio marcado como inactivo (active=True)",
+)
+async def activate_audio(
+    audio_service: AudioServiceDep,
+    audio_id: str = Path(..., description="ID del audio a activar"),
+) -> CommonResponse:
+    """
+    Activa un audio cambiando su estado false a True.
+    """
+
+    result = audio_service.activate_audio(audio_id=audio_id)
+
+    logger.info(f"ACTIVATE /audio/{audio_id}")
+
+    return CommonResponse.success(
+        message=result["message"],
+        data={
+            "audio_id": result["audio_id"],
+            "profile_id": result["profile_id"],
+            "profile_name": result["profile_name"]
+        }
+    )

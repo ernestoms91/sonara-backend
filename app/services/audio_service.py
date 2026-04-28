@@ -6,6 +6,7 @@ import soundfile as sf
 import numpy as np
 from pathlib import Path
 from sqlmodel import Session
+from sympy import false
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.generated_audio_model import GeneratedAudio
@@ -176,7 +177,8 @@ class AudioService:
     def get_audios_paginated(
         self,
         page: int = 1,
-        size: int = 50
+        size: int = 50,
+        actives = True
     ) -> dict:
         """
         Obtiene todos los audios paginados con nombre del perfil.
@@ -202,8 +204,57 @@ class AudioService:
         logger.info(
             f"Obteniendo audios paginados - Página: {page}, Tamaño: {size}")
 
-        result = self.audio_repo.get_audios_paginated(page=page, size=size)
+        result = self.audio_repo.get_audios_paginated(page=page, size=size, actives=actives)
 
         logger.info(
             f"Audios obtenidos - Total: {result['total']}, Páginas: {result['pages']}")
         return result
+    
+
+    def soft_delete_audio(self, audio_id: str) -> dict:
+        """
+        Soft delete: desactiva un audio (cambia active a False)
+        """
+        # 1. Verificar que el audio existe y obtener su estado actual
+        audio = self.audio_repo.get_by_audio_id(audio_id)
+        
+        if not audio:
+            raise ValueError(f"Audio {audio_id} no encontrado o se encuentra desactivado")
+        
+        # 2. Ejecutar soft delete
+        self.audio_repo.soft_delete(audio_id)
+        
+        # 3. Log de la operación
+        logger.info(f"Audio {audio_id} desactivado (soft delete)")
+        
+        # 4. Retornar respuesta
+        return {
+            "audio_id": audio_id,
+            "message": "Audio desactivado correctamente",
+            "profile_id": audio["profile_id"],
+            "profile_name": audio["profile_name"]
+        }
+        
+    def activate_audio(self, audio_id: str) -> dict:
+        """
+        Activate: Activa un audio (cambia active a true)
+        """
+        # 1. Verificar que el audio existe y obtener su estado actual
+        audio = self.audio_repo.get_by_audio_id(audio_id, active=0)
+        
+        if not audio:
+            raise ValueError(f"Audio {audio_id} no encontrado")
+        
+        # 2. Activar
+        self.audio_repo.activate(audio_id)
+        
+        # 3. Log de la operación
+        logger.info(f"Audio {audio_id} activado")
+        
+        # 4. Retornar respuesta
+        return {
+            "audio_id": audio_id,
+            "message": "Audio activado",
+            "profile_id": audio["profile_id"],
+            "profile_name": audio["profile_name"]
+        }
