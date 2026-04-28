@@ -4,6 +4,7 @@ from sqlmodel import Session, select
 from app.models.generated_audio_model import GeneratedAudio
 from app.core.logging import get_logger
 from fastapi_pagination.ext.sqlmodel import paginate
+from fastapi_pagination import Params
 
 logger = get_logger(__name__)
 
@@ -45,7 +46,7 @@ class GeneratedAudioRepository:
         }
 
 
-    def get_paginated(self, page: int = 1, size: int = 50) -> dict:
+    def get_audios_paginated(self, page: int = 1, size: int = 50) -> dict:
         """
         Obtiene todos los audios paginados con el nombre del perfil.
         """
@@ -59,14 +60,19 @@ class GeneratedAudioRepository:
             Profile.name.label("profile_name")
         ).join(
             Profile, GeneratedAudio.profile_id == Profile.id
+        ).where(
+            GeneratedAudio.active == True
         ).order_by(GeneratedAudio.created_at.desc())
         
-        result = paginate(self.db, statement)
+        params = Params(page=page, size=size)
+        result = paginate(self.db, statement, params)
         
+        items = [dict(item._mapping) for item in result.items]
+            
         return {
-            "items": [dict(item) for item in result.items],
-            "total": result.total,
-            "page": result.page,
-            "size": result.size,
-            "pages": result.pages
+                "items": items,
+                "total": result.total,
+                "page": result.page,
+                "size": result.size,
+                "pages": result.pages
         }

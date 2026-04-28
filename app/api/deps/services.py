@@ -1,6 +1,7 @@
 # app/api/deps/services.py
 from typing import Annotated
 from fastapi import Depends
+from app.services import audio_service
 from app.services.audio_service import AudioService
 from app.services.profile_service import ProfileService
 from app.services.tts_service import TTSService

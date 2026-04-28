@@ -1,5 +1,5 @@
 # app/api/routers/audio_router.py
-from fastapi import APIRouter, status, Path, Form, Body
+from fastapi import APIRouter, status, Path, Form, Query
 from app.api.deps.services import AudioServiceDep
 from app.schemas.common import CommonResponse
 from app.core.logging import get_logger
@@ -18,7 +18,8 @@ router = APIRouter(prefix="/audio", tags=["AUDIO"])
 async def generate_audio(
     audio_service: AudioServiceDep,
     profile_id: int = Path(..., gt=0, description="ID del perfil"),
-    text: str = Form(..., min_length=1, max_length=1000, description="Texto a sintetizar"),
+    text: str = Form(..., min_length=1, max_length=1000,
+                     description="Texto a sintetizar"),
 ) -> CommonResponse:
     """
     Genera un audio usando la voz clonada del perfil.
@@ -27,7 +28,7 @@ async def generate_audio(
         profile_id=profile_id,
         text=text
     )
-    
+
     return CommonResponse.success(
         message="Audio generated successfully",
         data={
@@ -47,7 +48,8 @@ async def generate_audio(
 async def change_audio_duration(
     audio_service: AudioServiceDep,
     audio_id: str = Path(..., description="UUID del audio original"),
-    target_duration: float = Form(..., gt=0.1, le=60.0, description="Duración deseada en segundos (0.1 - 60)"),
+    target_duration: float = Form(..., gt=0.1, le=60.0,
+                                  description="Duración deseada en segundos (0.1 - 60)"),
 ) -> CommonResponse:
     """
     Cambia la duración de un audio manteniendo el tono.
@@ -56,7 +58,7 @@ async def change_audio_duration(
         audio_id=audio_id,
         target_duration=target_duration
     )
-    
+
     return CommonResponse.success(
         message=f"Audio duration changed to {target_duration} seconds",
         data={
@@ -66,5 +68,40 @@ async def change_audio_duration(
             "new_duration": result["new_duration"],
             "filename": result["filename"],
             "created_at": result["created_at"].isoformat() if result["created_at"] else None
+        }
+    )
+
+
+@router.get(
+    "/all",
+    response_model=CommonResponse,
+    summary="Obtener lista paginada de audios",
+    description="Obtiene todos los audios paginados incluyendo el nombre del perfil asociado",
+)
+async def get_audios_paginated(
+    audio_service: AudioServiceDep,
+    page: int = Query(
+        1, ge=1, description="Número de página (empieza en 1)"),
+    size: int = Query(
+        50, ge=1, le=100, description="Cantidad de items por página (máx 100)"),
+) -> CommonResponse:
+    """
+    Obtiene todos los audios paginados con nombre del perfil.
+
+    - **page**: Número de página (default: 1)
+    - **size**: Items por página (default: 50, máx: 100)
+    """
+    logger.info(f"GET /audio/audios - page={page}, size={size}")
+
+    result = audio_service.get_audios_paginated(page=page, size=size)
+
+    return CommonResponse.success(
+        message="Audios retrieved successfully",
+        data={
+            "items": result["items"],
+            "total": result["total"],
+            "page": result["page"],
+            "size": result["size"],
+            "pages": result["pages"]
         }
     )

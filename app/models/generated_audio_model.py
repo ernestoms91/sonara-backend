@@ -3,7 +3,8 @@ from sqlmodel import Relationship, SQLModel, Field
 from typing import List, Optional
 from datetime import datetime, timezone
 
-from app.models.boletin_model import Boletin
+from app.models.boletin_audio_link import BoletinAudioLink
+
 
 class GeneratedAudio(SQLModel, table=True):
     __tablename__ = "generated_audio"
@@ -18,9 +19,10 @@ class GeneratedAudio(SQLModel, table=True):
     duration: float  # segundos
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     profile_id: int = Field(foreign_key="profile.id", index=True)
+    active: bool = Field(default=True)
     
      # Relación muchos a muchos (inversa)
     boletines: List["Boletin"] = Relationship(
         back_populates="audios",
-        link_model="BoletinAudioLink"
+        link_model=BoletinAudioLink
     )

@@ -9,7 +9,7 @@ from sqlmodel import Session
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.generated_audio_model import GeneratedAudio
-from app.repositories.generated_audio_repository import AudioRepository
+from app.repositories.generated_audio_repository import GeneratedAudioRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.services.tts_service import TTSService
 
@@ -21,7 +21,7 @@ class AudioService:
         self.db = db
         self.tts_service = tts_service
         self.profile_repo = ProfileRepository(db)
-        self.audio_repo = AudioRepository(db)
+        self.audio_repo = GeneratedAudioRepository(db)
         self.audios_base_dir = Path(settings.OUTPUT_DIR) / "generated"
 
     def generate_and_save(self, profile_id: int, text: str) -> dict:
@@ -32,35 +32,36 @@ class AudioService:
         profile = self.profile_repo.get_by_id(profile_id)
         if not profile:
             raise ValueError(f"Perfil {profile_id} no encontrado")
-        
+
         if not profile.active:
             raise ValueError(f"Perfil {profile_id} no está activo")
-        
+
         # 2. Generar UUID para el audio
         audio_uuid = str(uuid.uuid4())
-        
+
         # 3. Cargar prompt
-        profile_folder = Path(settings.OUTPUT_DIR) / "profiles" / profile.folder_id
+        profile_folder = Path(settings.OUTPUT_DIR) / \
+            "profiles" / profile.folder_id
         prompt_path = profile_folder / f"{profile.name.lower()}.pt"
-        
+
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt no encontrado: {prompt_path}")
-        
+
         prompt = self.tts_service.load_prompt(str(prompt_path))
-        
+
         # 4. Generar audio
         audio_array, sample_rate = self.tts_service.synthesize(prompt, text)
         duration = len(audio_array) / sample_rate
-        
+
         # 5. Guardar archivo (usando el UUID como nombre)
         self.audios_base_dir.mkdir(parents=True, exist_ok=True)
-        
+
         filename = f"{audio_uuid}.wav"
         audio_path = self.audios_base_dir / filename
-        
+
         sf.write(audio_path, audio_array, sample_rate)
         logger.info(f"Audio guardado en: {audio_path}")
-        
+
         # 6. Guardar metadatos en BD (con el UUID generado)
         audio_metadata = GeneratedAudio(
             audio_id=audio_uuid,
@@ -69,12 +70,12 @@ class AudioService:
             duration=duration
         )
         saved_audio = self.audio_repo.create(audio_metadata)
-        
+
         # 7. Preparar respuesta
         audio_buffer = io.BytesIO()
         sf.write(audio_buffer, audio_array, sample_rate, format='wav')
         audio_bytes = audio_buffer.getvalue()
-        
+
         return {
             "id": saved_audio.id,
             "audio_id": saved_audio.audio_id,
@@ -83,7 +84,7 @@ class AudioService:
             "duration": duration,
             "created_at": saved_audio.created_at
         }
-    
+
     def change_audio_duration(self, audio_id: str, target_duration: float) -> dict:
         """
         Cambia la duración de un audio usando scipy.signal.resample.
@@ -97,33 +98,36 @@ class AudioService:
         # 2. Buscar el archivo original
         original_path = self.audios_base_dir / f"{audio_id}.wav"
         if not original_path.exists():
-            raise FileNotFoundError(f"Archivo de audio no encontrado: {original_path}")
+            raise FileNotFoundError(
+                f"Archivo de audio no encontrado: {original_path}")
 
         # 3. Cargar audio
         audio_array, sample_rate = sf.read(original_path)
-        
+
         # 4. Asegurar que es mono
         if audio_array.ndim == 2:
             audio_array = np.mean(audio_array, axis=1)
             logger.info("Audio convertido de estéreo a mono")
-        
+
         # 5. Calcular duración actual
         current_duration = len(audio_array) / sample_rate
-        logger.info(f"Original: duración={current_duration:.4f}s, sample_rate={sample_rate}")
+        logger.info(
+            f"Original: duración={current_duration:.4f}s, sample_rate={sample_rate}")
         logger.info(f"Target: duración={target_duration:.4f}s")
 
         # 6. Calcular nuevo número de muestras
         new_length = int(round(target_duration * sample_rate))
-        logger.info(f"Nuevas muestras: {new_length} (original: {len(audio_array)})")
+        logger.info(
+            f"Nuevas muestras: {new_length} (original: {len(audio_array)})")
 
         # 7. Redimensionar usando scipy.resample
         # Nota: esto cambia la duración y el tono ligeramente
         audio_resampled = signal.resample(audio_array, new_length)
-        
+
         # 8. Verificar resultado
         if audio_resampled.size == 0:
             raise RuntimeError("Resample produjo un audio vacío")
-        
+
         # 9. Normalizar volumen para evitar saturación
         max_abs = np.max(np.abs(audio_resampled))
         if max_abs > 0:
@@ -134,12 +138,14 @@ class AudioService:
         new_audio_uuid = str(uuid.uuid4())
         new_filename = f"{new_audio_uuid}.wav"
         new_audio_path = self.audios_base_dir / new_filename
-        
-        sf.write(new_audio_path, audio_resampled.astype(np.float32), sample_rate, subtype='PCM_16')
-        
+
+        sf.write(new_audio_path, audio_resampled.astype(
+            np.float32), sample_rate, subtype='PCM_16')
+
         # 11. Verificar el resultado
         new_duration = len(audio_resampled) / sample_rate
-        logger.info(f"Nuevo audio: duración={new_duration:.4f}s, guardado en {new_audio_path}")
+        logger.info(
+            f"Nuevo audio: duración={new_duration:.4f}s, guardado en {new_audio_path}")
 
         # 12. Guardar metadatos en BD
         new_audio_metadata = GeneratedAudio(
@@ -152,7 +158,8 @@ class AudioService:
 
         # 13. Preparar respuesta
         audio_buffer = io.BytesIO()
-        sf.write(audio_buffer, audio_resampled, sample_rate, format='WAV', subtype='PCM_16')
+        sf.write(audio_buffer, audio_resampled, sample_rate,
+                 format='WAV', subtype='PCM_16')
         audio_bytes = audio_buffer.getvalue()
 
         return {
@@ -165,3 +172,38 @@ class AudioService:
             "new_duration": new_duration,
             "created_at": saved_audio.created_at
         }
+
+    def get_audios_paginated(
+        self,
+        page: int = 1,
+        size: int = 50
+    ) -> dict:
+        """
+        Obtiene todos los audios paginados con nombre del perfil.
+
+        Args:
+            page: Número de página (default: 1)
+            size: Items por página (default: 50, max: 100)
+
+        Returns:
+            Dict con items, total, page, size, pages
+        """
+        # Reglas de negocio: límite máximo de 100 items por página
+        if size > 100:
+            logger.warning(
+                f"Tamaño de página {size} excede el límite, limitando a 100")
+            size = 100
+
+        # Validar que page sea al menos 1
+        if page < 1:
+            logger.warning(f"Página {page} inválida, usando página 1")
+            page = 1
+
+        logger.info(
+            f"Obteniendo audios paginados - Página: {page}, Tamaño: {size}")
+
+        result = self.audio_repo.get_audios_paginated(page=page, size=size)
+
+        logger.info(
+            f"Audios obtenidos - Total: {result['total']}, Páginas: {result['pages']}")
+        return result

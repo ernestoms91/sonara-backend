@@ -1,5 +1,4 @@
 # app/repositories/profile_repository.py
-from cffi import model
 from sqlmodel import Session, select
 from typing import List, Optional
 from app.models.profile_model import Profile

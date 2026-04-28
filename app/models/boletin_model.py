@@ -3,7 +3,7 @@ from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
 from datetime import datetime, timezone
 from app.models.generated_audio_model import GeneratedAudio
-
+from app.models.boletin_audio_link import BoletinAudioLink
 
 class Boletin(SQLModel, table=True):
     __tablename__ = "boletin"
@@ -25,7 +25,7 @@ class Boletin(SQLModel, table=True):
     # Relación muchos a muchos
     audios: List["GeneratedAudio"] = Relationship(
         back_populates="boletines",
-        link_model="BoletinAudioLink"
+        link_model=BoletinAudioLink
     )
     
     @property
