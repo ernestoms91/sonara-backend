@@ -12,6 +12,15 @@ logger = get_logger(__name__)
 class GeneratedAudioRepository:
     def __init__(self, db: Session):
         self.db = db
+        
+    def create(self, audio: GeneratedAudio) -> GeneratedAudio:
+        """Guarda un audio generado en BD"""
+        self.db.add(audio)
+        self.db.commit()
+        self.db.refresh(audio)
+        logger.info(
+        f"Audio guardado con ID: {audio.id}, audio_id: {audio.audio_id}")
+        return audio
 
     def get_by_audio_id(self, audio_id: str) -> dict | None:
         """
