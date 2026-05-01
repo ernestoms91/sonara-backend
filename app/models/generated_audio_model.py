@@ -21,6 +21,12 @@ class GeneratedAudio(SQLModel, table=True):
     profile_id: int = Field(foreign_key="profile.id", index=True)
     active: bool = Field(default=True)
     
+   # Relación con Profile (Muchos a Uno) - nombre más claro
+    owner_profile: Optional["Profile"] = Relationship(
+        back_populates="owned_audios"
+    )
+
+
      # Relación muchos a muchos (inversa)
     boletines: List["Boletin"] = Relationship(
         back_populates="audios",

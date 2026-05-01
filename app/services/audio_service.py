@@ -92,7 +92,7 @@ class AudioService:
         Para cambios pequeños (5-10%), la diferencia de tono es imperceptible.
         """
         # 1. Obtener metadatos del audio original
-        audio_info = self.audio_repo.get_by_audio_id(audio_id)
+        audio_info = self.audio_repo.get_by_id(audio_id)
         if not audio_info:
             raise ValueError(f"Audio {audio_id} no encontrado")
 
@@ -216,7 +216,7 @@ class AudioService:
         Soft delete: desactiva un audio (cambia active a False)
         """
         # 1. Verificar que el audio existe y obtener su estado actual
-        audio = self.audio_repo.get_by_audio_id(audio_id)
+        audio = self.audio_repo.get_by_id(audio_id)
         
         if not audio:
             raise ValueError(f"Audio {audio_id} no encontrado o se encuentra desactivado")
@@ -240,7 +240,7 @@ class AudioService:
         Activate: Activa un audio (cambia active a true)
         """
         # 1. Verificar que el audio existe y obtener su estado actual
-        audio = self.audio_repo.get_by_audio_id(audio_id, active=0)
+        audio = self.audio_repo.get_by_id(audio_id, active=0)
         
         if not audio:
             raise ValueError(f"Audio {audio_id} no encontrado")

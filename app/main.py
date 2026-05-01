@@ -1,13 +1,14 @@
 # main.py
 from fastapi_pagination import add_pagination
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.errors import http_exception_handler, general_exception_handler, validation_exception_handler, value_error_handler
+from app.api.errors import  register_exception_handlers
 from app.api.routers.audio_router import router as audio_router
 from app.api.routers.info_router import router as info_router
 from app.api.routers.profile_router import router as tts_router
+from app.api.routers.boletin_router import router as boletin_router
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.model import TTSModel
@@ -64,12 +65,10 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-app.add_exception_handler(HTTPException, http_exception_handler)
-app.add_exception_handler(RequestValidationError, validation_exception_handler)
-app.add_exception_handler(Exception, general_exception_handler)
-app.add_exception_handler(ValueError, value_error_handler)
+register_exception_handlers(app)
 
 app.include_router(audio_router, prefix="/api/v1")
+app.include_router(boletin_router, prefix="/api/v1")
 app.include_router(info_router, prefix="/api/v1")
 app.include_router(tts_router, prefix="/api/v1")
 

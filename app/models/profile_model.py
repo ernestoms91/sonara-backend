@@ -1,8 +1,9 @@
 # models/profile.py
-from sqlmodel import SQLModel, Field
-from typing import Optional
+from sqlmodel import Relationship, SQLModel, Field
+from typing import List, Optional
 from datetime import datetime, timezone
-import uuid
+
+from app.models.generated_audio_model import GeneratedAudio
 
 
 class Profile(SQLModel, table=True):
@@ -18,3 +19,9 @@ class Profile(SQLModel, table=True):
     language: str = Field(default="Spanish")
     ref_text: str = Field(default="")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    #Relación: Un Profile tiene muchos GeneratedAudio - nombre más claro
+    owned_audios: List["GeneratedAudio"] = Relationship(
+        back_populates="owner_profile",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )

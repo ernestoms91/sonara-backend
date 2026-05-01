@@ -22,7 +22,7 @@ class GeneratedAudioRepository:
             f"Audio guardado con ID: {audio.id}, audio_id: {audio.audio_id}")
         return audio
 
-    def get_by_audio_id(self, audio_id: str, active = True) -> dict | None:
+    def get_by_id(self, audio_id: str, active = True) -> dict | None:
         """
         Busca un audio por su ID público.
         Hace JOIN con Profile para traer también el nombre del perfil.
@@ -55,6 +55,53 @@ class GeneratedAudioRepository:
             "profile_id": result.profile_id,
             "profile_name": result.profile_name
         }
+        
+    def get_by_audio_id(self, audio_id: str, active = True) -> dict | None:
+        """
+        Busca un audio por su ID público.
+        Hace JOIN con Profile para traer también el nombre del perfil.
+        """
+        statement = select(
+            GeneratedAudio.id,
+            GeneratedAudio.audio_id,
+            GeneratedAudio.text,
+            GeneratedAudio.duration,
+            GeneratedAudio.created_at,
+            GeneratedAudio.profile_id,
+            GeneratedAudio.active,
+            Profile.name.label("profile_name")
+        ).join(
+            Profile, GeneratedAudio.profile_id == Profile.id
+        ).where(GeneratedAudio.audio_id == audio_id, GeneratedAudio.active == active  )
+
+        result = self.db.exec(statement).first()
+
+        if not result:
+            return None
+        
+
+        return {
+            "id": result.id,
+            "audio_id": result.audio_id,
+            "text": result.text,
+            "active":result.active,
+            "duration": result.duration,
+            "created_at": result.created_at,
+            "profile_id": result.profile_id,
+            "profile_name": result.profile_name
+        }
+    
+    def get_by_audio_id_with_relationship(self, audio_id: str, active: bool = True) -> GeneratedAudio | None:
+        """
+        Busca un audio por su UUID público usando Relationship.
+        Retorna el objeto completo GeneratedAudio con acceso a owner_profile.
+        """
+        statement = select(GeneratedAudio).where(
+            GeneratedAudio.audio_id == audio_id,
+            GeneratedAudio.active == active
+        )
+        
+        return self.db.exec(statement).first()
 
     def get_audios_paginated(self, page: int = 1, size: int = 50, actives = True) -> dict:
         """
