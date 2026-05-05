@@ -3,6 +3,7 @@ import io
 import uuid
 from scipy import signal
 import soundfile as sf
+import re
 import numpy as np
 from pathlib import Path
 from sqlmodel import Session
@@ -25,6 +26,30 @@ class AudioService:
         self.audio_repo = GeneratedAudioRepository(db)
         self.audios_base_dir = Path(settings.OUTPUT_DIR) / "generated"
 
+    def _extract_first_sentence(self, text: str) -> str:
+        """
+        Extrae la primera oración del texto para usar como título.
+        """
+        if not text:
+            return "Audio sin título"
+
+        clean = text.strip()
+        # Buscar primera oración (termina en . ! ?)
+        match = re.search(r"(.+?[\.\!\?])(?:\s|$)", clean)
+        if match:
+            first_sentence = match.group(1).strip()
+            # Limitar a 60 caracteres para metadata (evitar problemas)
+            if len(first_sentence) > 60:
+                first_sentence = first_sentence[:57] + "..."
+            return first_sentence
+
+        # Si no encuentra puntuación, tomar primera línea o primeros 60 caracteres
+        first_line = clean.splitlines()[0].strip()
+        if len(first_line) > 60:
+            first_line = first_line[:57] + "..."
+        return first_line if first_line else "Audio sin título"
+    
+    
     def generate_and_save(self, profile_id: int, text: str) -> dict:
         """
         Genera audio y guarda tanto el archivo como los metadatos en BD.
@@ -59,6 +84,9 @@ class AudioService:
 
         filename = f"{audio_uuid}.wav"
         audio_path = self.audios_base_dir / filename
+        
+        # Extraer primera oración para metadata
+        title = self._extract_first_sentence(text)
 
         sf.write(audio_path, audio_array, sample_rate)
         logger.info(f"Audio guardado en: {audio_path}")
@@ -68,7 +96,8 @@ class AudioService:
             audio_id=audio_uuid,
             profile_id=profile_id,
             text=text,
-            duration=duration
+            duration=duration,
+            title=title
         )
         saved_audio = self.audio_repo.create(audio_metadata)
 

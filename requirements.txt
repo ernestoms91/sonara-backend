@@ -60,7 +60,6 @@ pydantic==2.12.5
 pydantic-extra-types==2.11.1
 pydantic-settings==2.13.1
 pydantic_core==2.41.5
-pydub==0.25.1
 Pygments==2.20.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
