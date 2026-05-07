@@ -1,229 +1,99 @@
 # app/core/security.py
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-from jose import JWTError, jwt
-from passlib.context import CryptContext
-from fastapi import HTTPException, status
-from app.core.config import settings
-from app.schemas.token import TokenData
-
-# Configuración de hashing de contraseñas
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto",
-    bcrypt__rounds=12
-)
-
-# ============================================
-# PASSWORD HASHING
-# ============================================
-
-def hash_password(password: str) -> str:
-    """
-    Hashea una contraseña usando bcrypt.
-    
-    Args:
-        password: Contraseña en texto plano
-        
-    Returns:
-        Contraseña hasheada
-    """
-    return pwd_context.hash(password)
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """
-    Verifica si una contraseña en texto plano coincide con su hash.
-    
-    Args:
-        plain_password: Contraseña en texto plano
-        hashed_password: Hash de la contraseña almacenado
-        
-    Returns:
-        True si coinciden, False en caso contrario
-    """
-    return pwd_context.verify(plain_password, hashed_password)
+import jwt
+from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
+import bcrypt
+from app.core.config import settings  # ← importamos tu Settings validado
 
 
 # ============================================
-# JWT TOKEN MANAGEMENT
+# JWT usando tu Settings
 # ============================================
-
 def create_access_token(
-    data: Dict[str, Any],
-    expires_delta: Optional[timedelta] = None
+    user_id: int, 
+    username: str, 
+    password_version: int, 
+    is_admin: bool = False
 ) -> str:
     """
-    Crea un token JWT de acceso.
-    
-    Args:
-        data: Datos a incluir en el token (sub, user_id, is_admin, etc.)
-        expires_delta: Tiempo de expiración personalizado (opcional)
-        
-    Returns:
-        Token JWT como string
+    Crea un token JWT con los datos del usuario.
     """
-    to_encode = data.copy()
-    
-    # Configurar tiempo de expiración
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.JWT_EXPIRES_MIN  # Usando tu variable JWT_EXPIRES_MIN
-        )
-    
-    to_encode.update({"exp": expire})
-    
-    # Generar token usando tus variables
-    encoded_jwt = jwt.encode(
-        to_encode,
-        settings.JWT_SECRET,  # Usando JWT_SECRET
-        algorithm=settings.JWT_ALG  # Usando JWT_ALG
-    )
-    
-    return encoded_jwt
+    payload = {
+        "sub": str(user_id),
+        "username": username,
+        "password_version": password_version,
+        "is_admin": is_admin,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRES_MIN),
+        "iat": datetime.now(timezone.utc),
+        "type": "access"
+    }
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALG)
 
 
-def decode_token(token: str) -> Optional[TokenData]:
+def decode_token(token: str) -> Optional[Dict[str, Any]]:
     """
     Decodifica y valida un token JWT.
-    
-    Args:
-        token: Token JWT a decodificar
-        
-    Returns:
-        TokenData si es válido, None en caso contrario
+    Retorna el payload si es válido, None si es inválido.
     """
     try:
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET,  # Usando JWT_SECRET
-            algorithms=[settings.JWT_ALG]  # Usando JWT_ALG
-        )
-        
-        username: str = payload.get("sub")
-        user_id: int = payload.get("user_id")
-        is_admin: bool = payload.get("is_admin", False)
-        
-        if username is None or user_id is None:
-            return None
-        
-        return TokenData(
-            username=username,
-            user_id=user_id,
-            is_admin=is_admin
-        )
-        
-    except JWTError:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALG])
+        return payload
+    except InvalidTokenError:
         return None
 
 
-def verify_token(token: str) -> TokenData:
+def validate_token_and_password_version(token: str, current_password_version: int) -> bool:
     """
-    Verifica un token JWT y lanza excepción si es inválido.
-    
-    Args:
-        token: Token JWT a verificar
-        
-    Returns:
-        TokenData si es válido
-        
-    Raises:
-        HTTPException: Si el token es inválido o expiró
+    Valida que el token sea válido y que la password_version coincida.
     """
-    token_data = decode_token(token)
+    payload = decode_token(token)
+    if not payload:
+        return False
     
-    if token_data is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    if payload.get("type") != "access":
+        return False
     
-    return token_data
-
-
-def refresh_access_token(refresh_token: str) -> str:
-    """
-    Genera un nuevo access token a partir de un refresh token.
-    
-    Args:
-        refresh_token: Token de refresco
-        
-    Returns:
-        Nuevo access token
-    """
-    token_data = verify_token(refresh_token)
-    
-    # Crear nuevo token con los mismos datos
-    new_token = create_access_token(
-        data={
-            "sub": token_data.username,
-            "user_id": token_data.user_id,
-            "is_admin": token_data.is_admin
-        }
-    )
-    
-    return new_token
+    return payload.get("password_version") == current_password_version
 
 
 # ============================================
-# UTILITY FUNCTIONS
+# HASHING DE PASSWORDS
 # ============================================
+def hash_password(plain_password: str) -> str:
+    """Hashea una contraseña usando bcrypt."""
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(plain_password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
 
-def get_token_expiration() -> datetime:
-    """
-    Retorna la fecha/hora de expiración para un nuevo token.
-    """
-    return datetime.now(timezone.utc) + timedelta(
-        minutes=settings.JWT_EXPIRES_MIN
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verifica una contraseña contra su hash almacenado."""
+    return bcrypt.checkpw(
+        plain_password.encode('utf-8'),
+        hashed_password.encode('utf-8')
     )
+
+
+# ============================================
+# UTILIDADES ADICIONALES
+# ============================================
+def get_user_id_from_token(token: str) -> Optional[int]:
+    """Extrae el user_id del token sin validar versión."""
+    payload = decode_token(token)
+    if payload:
+        sub = payload.get("sub")
+        if sub:
+            return int(sub)
+    return None
 
 
 def is_token_expired(token: str) -> bool:
-    """
-    Verifica si un token ya expiró.
-    
-    Args:
-        token: Token JWT a verificar
-        
-    Returns:
-        True si expiró, False en caso contrario
-    """
+    """Verifica específicamente si el token expiró."""
     try:
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALG],
-            options={"verify_exp": True}
-        )
+        jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALG])
         return False
-    except jwt.ExpiredSignatureError:
+    except ExpiredSignatureError:
         return True
-    except JWTError:
+    except InvalidTokenError:
         return True
-
-
-# ============================================
-# VALIDATE SYSTEM CONFIG
-# ============================================
-
-def validate_jwt_config() -> bool:
-    """
-    Valida que la configuración JWT sea correcta.
-    
-    Returns:
-        True si es válida, False en caso contrario
-    """
-    try:
-        # Probar crear y verificar un token
-        test_data = {"sub": "test", "user_id": 1, "is_admin": False}
-        token = create_access_token(test_data, expires_delta=timedelta(minutes=1))
-        decoded = decode_token(token)
-        
-        if decoded and decoded.username == "test" and decoded.user_id == 1:
-            return True
-        return False
-    except Exception:
-        return False

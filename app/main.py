@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from requests import auth
 from app.api.errors import  register_exception_handlers
 from app.api.routers.audio_router import router as audio_router
+from app.api.routers.auth_router import router as auth_router
 from app.api.routers.info_router import router as info_router
-from app.api.routers.profile_router import router as tts_router
 from app.api.routers.boletin_router import router as boletin_router
 from app.core.config import settings
 from app.core.database import init_db
@@ -68,9 +69,10 @@ app.add_middleware(
 register_exception_handlers(app)
 
 app.include_router(audio_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(boletin_router, prefix="/api/v1")
 app.include_router(info_router, prefix="/api/v1")
-app.include_router(tts_router, prefix="/api/v1")
+
 
 logger.info(f"API {settings.PROJECT_NAME} configurada correctamente")
 logger.info(f"Nivel de logging: {settings.LOG_LEVEL}")

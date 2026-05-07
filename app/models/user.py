@@ -16,6 +16,9 @@ class User(SQLModel, table=True):
     is_active: bool = Field(default=True)
     is_admin: bool = Field(default=False)
     
+    # Password version - para invalidar tokens JWT cuando cambia la contraseña
+    password_version: int = Field(default=0, nullable=False)
+    
     # Timestamps - versión timezone-aware
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -3,7 +3,7 @@ from sqlmodel import Session, select
 from typing import List, Optional
 from app.models.user import User
 from app.core.logging import get_logger
-from app.schemas.user import UserCreate
+from app.schemas.auth import UserCreate
 
 logger = get_logger(__name__)
 

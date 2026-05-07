@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import Depends
 from app.services import audio_service
 from app.services.audio_service import AudioService
+from app.services.auth_service import AuthService
 from app.services.boletin_service import BoletinService
 from app.services.profile_service import ProfileService
 from app.services.tts_service import TTSService
@@ -41,3 +42,9 @@ def get_boletin_service(
     return BoletinService(db)
 
 BoletinServiceDep = Annotated[BoletinService, Depends(get_boletin_service)]
+
+
+def get_auth_service(session: DBSession) -> AuthService:
+    return AuthService(session)
+
+AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
