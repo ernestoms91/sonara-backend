@@ -1,4 +1,6 @@
 # app/repositories/profile_repository.py
+from fastapi_pagination import Params
+from fastapi_pagination.ext.sqlmodel import paginate 
 from sqlmodel import Session, select
 from typing import List, Optional
 from app.models.profile_model import Profile
@@ -59,53 +61,43 @@ class ProfileRepository:
         self.db.refresh(profile)
         return profile
     
-    # ============================================
-    # DELETE PROFILE
-    # ============================================
-    def delete(self, profile: Profile) -> None:
-        """Eliminar un perfil"""
-        self.db.delete(profile)
-        self.db.commit()
-        
-        logger.info(f"Perfil eliminado: ID={profile.id}")
-    
-    def delete_by_id(self, profile_id: int) -> None:
-        """Eliminar un perfil por ID"""
-        profile = self.get_by_id(profile_id)
-        if profile:
-            self.delete(profile)
-    
-    # ============================================
-    # COUNT METHODS
-    # ============================================
-    def count_all(self) -> int:
-        """Contar total de perfiles"""
-        query = select(Profile)
-        return len(self.db.exec(query).all())
-    
-    def count_active(self) -> int:
-        """Contar perfiles activos"""
-        query = select(Profile).where(Profile.active == True)
-        return len(self.db.exec(query).all())
-    
-    # ============================================
-    # EXISTS METHODS
-    # ============================================
-    def exists_by_name(self, name: str) -> bool:
-        """Verificar si existe un perfil con ese nombre"""
-        return self.get_by_name(name) is not None
-    
-    def exists_by_profile_id(self, profile_id: str) -> bool:
-        """Verificar si existe un perfil con ese profile_id"""
-        return self.get_by_profile_id(profile_id) is not None
-    
-    
-    # ============================================
-    # UPDATE HOURS READY
-    # ============================================
 
-    def update_hours_ready(self, profile: Profile, hours_ready: bool) -> None:
-        """Actualiza hours_ready de un perfil"""
-        profile.hours_ready = hours_ready
+    def update_active_status(self, profile: Profile, active: bool) -> Profile:
+        """Actualizar el estado activo/inactivo del perfil"""
+        profile.active = active
+        self.db.add(profile)
         self.db.commit()
         self.db.refresh(profile)
+        return profile
+
+    def update(self, profile: Profile) -> Profile:
+        """Actualizar cualquier campo del perfil"""
+        self.db.add(profile)
+        self.db.commit()
+        self.db.refresh(profile)
+        return profile
+    
+    def get_profiles_paginated(self, page: int = 1, size: int = 50, active_only: bool = False) -> dict:
+        """
+        Obtiene todos los perfiles paginados.
+        """
+        statement = select(Profile)
+        
+        if active_only:
+            statement = statement.where(Profile.active == True)
+        
+        statement = statement.order_by(Profile.name.asc())
+        
+        params = Params(page=page, size=size)
+        result = paginate(self.db, statement, params)
+        
+        # Convertir los items a diccionario (igual que en audios)
+        items = [item.model_dump() for item in result.items]        
+        
+        return {
+            "items": items,
+            "total": result.total,
+            "page": result.page,
+            "size": result.size,
+            "pages": result.pages
+        }

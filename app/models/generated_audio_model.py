@@ -1,5 +1,5 @@
 # app/models/generated_audio_model.py
-from sqlmodel import Relationship, SQLModel, Field
+from sqlmodel import Relationship, SQLModel, Field, JSON, Column
 from typing import List, Optional
 from datetime import datetime, timezone
 
@@ -20,6 +20,7 @@ class GeneratedAudio(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     profile_id: int = Field(foreign_key="profile.id", index=True)
     active: bool = Field(default=True)
+    waveform: str = Field(max_length=1000)
     
    # Relación con Profile (Muchos a Uno) - nombre más claro
     owner_profile: Optional["Profile"] = Relationship(

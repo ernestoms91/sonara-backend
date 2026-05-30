@@ -71,10 +71,20 @@ class BoletinService:
         for index, audio_id in enumerate(audio_ids):
             audio_obj = self.audio_repo.get_by_audio_id_with_relationship(audio_id)
             folder_id = audio_obj.owner_profile.folder_id
-            conector1 = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/conec/Rreloj.m4a"
-            hours_path = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/hours/{hour}.m4a"
-            mins_path = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/min/{index}.m4a"
-            conector2 = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/conec/Minutos.m4a"
+            conector_rreloj = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/Connectors/rreloj.mp3"
+            hours_path = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/Hours/{hour}.mp3"
+            
+             # Para las 12:00, verificar si es AM o PM según el contexto
+            if start_time == "12:00":
+            # Asumiendo que "12:00" solo puede ser mediodía o medianoche
+            # Por defecto usamos "12 PM.mp3" para mediodía
+                hour_filename = "12 PM.mp3"
+            elif start_time == "00:00":
+                hour_filename = "12 AM.mp3"
+            else:
+                hour_filename = f"{hour}.mp3"
+                        
+            mins_path = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/Min/{hour_filename}.mp3"
             audio_path = f"{settings.OUTPUT_DIR}/generated/{audio_id}.wav"
 
             # Ruta de salida para este minuto
@@ -84,7 +94,7 @@ class BoletinService:
 
             # Verificar que todos los archivos existen
             missing_files = []
-            for file_path in [conector1, hours_path, mins_path, conector2, audio_path]:
+            for file_path in [conector_rreloj, hours_path, mins_path, audio_path]:
                 if not Path(file_path).exists():
                     missing_files.append(file_path)
 
@@ -93,69 +103,42 @@ class BoletinService:
                 continue
 
             time_path = AudioMerger.merge_audio_files(
-                audio_paths=[conector1, hours_path, mins_path, conector2],
+                audio_paths=[hours_path, mins_path],
                 output_path=output_path,
                 output_format="mp3",
                 crossfade_ms=0,
             )
 
             duration_time_path = AudioMerger.get_duration_seconds(time_path)
-            remaining_seconds = 60.0 - duration_time_path
+            duration_conector_rreloj = AudioMerger.get_duration(conector_rreloj)
+            remaining_seconds = 60.0 - duration_time_path - duration_conector_rreloj
 
             title = self._extract_title(audio_obj.text)
 
-            if remaining_seconds <= 0.0:
-                logger.warning(
-                    f"El bloque de tiempo para minuto {index} dura {duration_time_path:.2f}s y no deja espacio para el audio adicional."
-                )
 
-                if duration_time_path > 60.0:
-                    time_path = AudioMerger.adjust_duration(
-                        input_path=time_path,
-                        output_path=output_path,
-                        target_seconds=60.0,
-                        output_format="mp3",
-                        tags={"title": title},
-                    )
+            output_audios_path = f"{settings.OUTPUT_DIR}/boletines/{bol_date}/{hour_str}/temp/{audio_id}.mp3"
+            info_path = AudioMerger.adjust_duration(
+                input_path=audio_path,
+                output_path=output_audios_path,
+                target_seconds=remaining_seconds,
+                output_format="mp3",
+                tags={"title": title},
+            )
 
-                final_audio = AudioMerger.merge_audio_files(
-                    audio_paths=[time_path],
-                    output_path=final_audio_output_path,
-                    output_format="mp3",
-                    tags={"title": title},
-                )
-                final_audio = AudioMerger.enforce_duration(
-                    audio_path=final_audio,
-                    output_path=final_audio_output_path,
-                    target_seconds=60.0,
-                    output_format="mp3",
-                    tags={"title": title},
-                )
-            else:
-                output_audios_path = f"{settings.OUTPUT_DIR}/boletines/{bol_date}/{hour_str}/temp/{audio_id}.mp3"
-                info_path = AudioMerger.adjust_duration(
-                    input_path=audio_path,
-                    output_path=output_audios_path,
-                    target_seconds=remaining_seconds,
-                    output_format="mp3",
-                    tags={"title": title},
-                )
-
-                final_audio = AudioMerger.concatenate_audio_files(
-                    audio_paths=[time_path, info_path],
-                    output_path=final_audio_output_path,
-                    output_format="mp3",
-                    crossfade_ms=0,
-                    tags={"title": title},
-                )
-                final_audio = AudioMerger.enforce_duration(
-                    audio_path=final_audio,
-                    output_path=final_audio_output_path,
-                    target_seconds=60.0,
-                    output_format="mp3",
-                    tags={"title": title},
-                )
-
+            final_audio = AudioMerger.concatenate_audio_files(
+                audio_paths=[time_path, info_path, conector_rreloj],
+                output_path=final_audio_output_path,
+                output_format="mp3",
+                crossfade_ms=0,
+                tags={"title": title},
+            )
+            final_audio = AudioMerger.enforce_duration(
+                audio_path=final_audio,
+                output_path=final_audio_output_path,
+                target_seconds=60.0,
+                output_format="mp3",
+                tags={"title": title},
+            )
             duracion_final = AudioMerger.get_duration_seconds(final_audio)
             logger.info(f"Archivo de audio {index}: {duracion_final:.2f}s")
 

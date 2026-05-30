@@ -56,6 +56,11 @@ try:
     profiles_path.mkdir(parents=True, exist_ok=True)
     logging.info(f"Carpeta de perfiles: {profiles_path.absolute()}")
 
+    # Crear subcarpeta para waveform dentro de OUTPUT_DIR
+    waveform_path = output_path / "waveforms"
+    waveform_path.mkdir(parents=True, exist_ok=True)
+    logging.info(f"Carpeta de waveform: {waveform_path.absolute()}")
+
 except Exception as e:
     logging.critical(f"Error de configuración: {e}")
     sys.exit(1)

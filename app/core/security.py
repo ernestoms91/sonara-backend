@@ -4,8 +4,7 @@ from typing import Optional, Dict, Any
 import jwt
 from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 import bcrypt
-from app.core.config import settings  # ← importamos tu Settings validado
-
+from app.core.config import settings
 
 # ============================================
 # JWT usando tu Settings

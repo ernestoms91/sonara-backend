@@ -114,6 +114,7 @@ class GeneratedAudioRepository:
             GeneratedAudio.duration,
             GeneratedAudio.created_at,
             GeneratedAudio.profile_id,
+            GeneratedAudio.spectrum_frames,
             Profile.name.label("profile_name")
         ).join(
             Profile, GeneratedAudio.profile_id == Profile.id
@@ -122,7 +123,7 @@ class GeneratedAudioRepository:
         ).order_by(GeneratedAudio.created_at.desc())
 
         params = Params(page=page, size=size)
-        result = paginate(self.db, statement, params)
+        result = paginate(self.db, statement, params, unique=False)
 
         items = [dict(item._mapping) for item in result.items]
 

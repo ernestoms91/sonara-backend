@@ -1,12 +1,16 @@
 # app/services/profile_service.py
+from typing import Dict, List, Tuple
 import uuid
 import io
 import tempfile
 import shutil
+from fastapi import HTTPException, status
+from fastapi_pagination import Params, paginate
 import soundfile as sf
 from pathlib import Path
-from sqlmodel import Session
+from sqlmodel import Session, select
 from app.core.logging import get_logger
+from app.helpers.audio_templates import REQUIRED_AUDIO_FILES
 from app.models.profile_model import Profile
 from app.repositories.profile_repository import ProfileRepository
 from app.services.tts_service import TTSService
@@ -98,3 +102,144 @@ class ProfileService:
         finally:
             if temp_path and Path(temp_path).exists():
                 Path(temp_path).unlink(missing_ok=True)
+
+    def deactivate_profile(self, profile_id: int) -> Profile:
+        """
+        Desactivar un perfil existente (solo cambia flag active=False)
+        """
+        profile = self.repo.get_by_id(profile_id)
+        if not profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Profile with ID {profile_id} not found"
+            )
+        # Si ya está inactivo
+        if not profile.active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Profile '{profile.name}' is already deactivated"
+            )
+
+        # Actualizar estado
+        profile = self.repo.update_active_status(profile, active=False)
+
+        logger.info(
+            f"Profile '{profile.name}' (ID={profile_id}) desactivado exitosamente")
+        return profile
+
+    def validate_profile_files(self, profile: Profile) -> Tuple[bool, Dict[str, List[str]]]:
+        """
+        Valida que existan todos los archivos requeridos para un perfil.
+
+        Args:
+            profile: Objeto Profile (contiene folder_id)
+
+        Returns:
+            (is_valid, missing_files_dict)
+        """
+        # Construir ruta: OUTPUT_DIR/profiles/{folder_id}/
+        profile_dir = self.profiles_base_dir / profile.folder_id
+        missing_files = {}
+
+        for category, files in REQUIRED_AUDIO_FILES.items():
+            category_dir = profile_dir / category
+            missing_in_category = []
+
+            for filename in files:
+                file_path = category_dir / filename
+                if not file_path.exists():
+                    missing_in_category.append(filename)
+
+            if missing_in_category:
+                missing_files[category] = missing_in_category
+
+        is_valid = len(missing_files) == 0
+        return is_valid, missing_files
+
+    def activate_profile_with_validation(self, profile_id: int) -> Profile:
+        """
+        Activa un perfil SOLO si todos los archivos requeridos existen.
+        """
+        profile = self.repo.get_by_id(profile_id)
+        if not profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Profile with ID {profile_id} not found"
+            )
+
+        if profile.active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Profile '{profile.name}' is already active"
+            )
+
+        # Validar archivos usando folder_id
+        is_valid, missing_files = self.validate_profile_files(profile)
+
+        if not is_valid:
+            # Convertir missing_files a string legible
+            missing_summary = []
+            for category, files in missing_files.items():
+                missing_summary.append(f"{category}: {', '.join(files[:5])}" +
+                                       (f" and {len(files)-5} more" if len(files) > 5 else ""))
+
+            detail_message = f"Missing required audio files. {'; '.join(missing_summary)}"
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=detail_message  # Esto es un string
+            )
+
+        # Actualizar todos los flags
+        profile.active = True
+        profile.hours_ready = True
+        profile.minutes_ready = True
+        profile.connectors_ready = True
+
+        profile = self.repo.update(profile)
+
+        logger.info(
+            f"Profile '{profile.name}' (ID={profile_id}, folder_id={profile.folder_id}) "
+            f"activado con todos los archivos validados"
+        )
+
+        return profile
+
+
+    def get_profiles_paginated(
+        self,
+        page: int = 1,
+        size: int = 50,
+        active_only: bool = False
+    ) -> dict:
+        """
+        Obtiene todos los perfiles paginados.
+
+        Args:
+            page: Número de página (default: 1)
+            size: Items por página (default: 50, max: 100)
+            active_only: Filtrar solo activos (default: False)
+
+        Returns:
+            Dict con items, total, page, size, pages
+        """
+        # Reglas de negocio: límite máximo de 100 items por página
+        if size > 100:
+            logger.warning(
+                f"Tamaño de página {size} excede el límite, limitando a 100")
+            size = 100
+
+        # Validar que page sea al menos 1
+        if page < 1:
+            logger.warning(f"Página {page} inválida, usando página 1")
+            page = 1
+
+        logger.info(
+            f"Obteniendo perfiles paginados - Página: {page}, Tamaño: {size}, Activos solo: {active_only}")
+
+        result = self.repo.get_profiles_paginated(
+            page=page, size=size, active_only=active_only)
+
+        logger.info(
+            f"Perfiles obtenidos - Total: {result['total']}, Páginas: {result['pages']}")
+        return result

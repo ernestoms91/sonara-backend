@@ -1,4 +1,5 @@
 # app/services/audio_service.py
+import json  
 import io
 import uuid
 from scipy import signal
@@ -10,6 +11,7 @@ from sqlmodel import Session
 from sympy import false
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.helpers.generate_peaks import generate_peaks_from_array
 from app.models.generated_audio_model import GeneratedAudio
 from app.repositories.generated_audio_repository import GeneratedAudioRepository
 from app.repositories.profile_repository import ProfileRepository
@@ -25,6 +27,7 @@ class AudioService:
         self.profile_repo = ProfileRepository(db)
         self.audio_repo = GeneratedAudioRepository(db)
         self.audios_base_dir = Path(settings.OUTPUT_DIR) / "generated"
+        self.waveforms_base_dir = Path(settings.OUTPUT_DIR) / "waveforms"
 
     def _extract_first_sentence(self, text: str) -> str:
         """
@@ -66,8 +69,7 @@ class AudioService:
         audio_uuid = str(uuid.uuid4())
 
         # 3. Cargar prompt
-        profile_folder = Path(settings.OUTPUT_DIR) / \
-            "profiles" / profile.folder_id
+        profile_folder = Path(settings.OUTPUT_DIR) / "profiles" / profile.folder_id
         prompt_path = profile_folder / f"{profile.name.lower()}.pt"
 
         if not prompt_path.exists():
@@ -78,30 +80,51 @@ class AudioService:
         # 4. Generar audio
         audio_array, sample_rate = self.tts_service.synthesize(prompt, text)
         duration = len(audio_array) / sample_rate
+        
+        # 5. Generar peaks (waveform)
+        peaks = generate_peaks_from_array(audio_array, sample_rate, pixels_per_second=20)
 
-        # 5. Guardar archivo (usando el UUID como nombre)
+        # Crear estructura del JSON
+        waveform_data = {
+            "sample_rate": sample_rate,
+            "bits": 8,
+            "duration": float(duration),
+            "channels": 1 if len(audio_array.shape) == 1 else 2,
+            "pixels_per_second": 20,
+            "data_overview_length": len(peaks),
+            "data": peaks,
+        }
+
+        # Nombre del archivo de waveform
+        waveform_filename = f"{audio_uuid}.json"
+        waveform_path = self.waveforms_base_dir / waveform_filename
+
+        # Guardar JSON
+        with open(waveform_path, "w", encoding="utf-8") as f:
+            json.dump(waveform_data, f, ensure_ascii=False)
+
+        logger.info(f"Waveform guardado en: {waveform_path}")
+
+        # 6. Guardar archivo
         self.audios_base_dir.mkdir(parents=True, exist_ok=True)
-
         filename = f"{audio_uuid}.wav"
         audio_path = self.audios_base_dir / filename
         
-        # Extraer primera oración para metadata
-        title = self._extract_first_sentence(text)
-
         sf.write(audio_path, audio_array, sample_rate)
         logger.info(f"Audio guardado en: {audio_path}")
 
-        # 6. Guardar metadatos en BD (con el UUID generado)
+        # 7. Guardar metadatos en BD (con espectro)
         audio_metadata = GeneratedAudio(
             audio_id=audio_uuid,
             profile_id=profile_id,
             text=text,
             duration=duration,
-            title=title
+            title=self._extract_first_sentence(text),
+            waveform=audio_uuid 
         )
         saved_audio = self.audio_repo.create(audio_metadata)
 
-        # 7. Preparar respuesta
+        # 8. Preparar respuesta
         audio_buffer = io.BytesIO()
         sf.write(audio_buffer, audio_array, sample_rate, format='wav')
         audio_bytes = audio_buffer.getvalue()
@@ -112,7 +135,8 @@ class AudioService:
             "audio_bytes": audio_bytes,
             "filename": filename,
             "duration": duration,
-            "created_at": saved_audio.created_at
+            "created_at": saved_audio.created_at,
+            "waveform": waveform_data
         }
 
     def change_audio_duration(self, audio_id: str, target_duration: float) -> dict:

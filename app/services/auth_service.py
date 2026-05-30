@@ -1,5 +1,5 @@
 # app/services/auth_service.py
-from types import Dict, Any
+from typing import Dict, Any
 from sqlmodel import Session, select
 from fastapi import HTTPException, status
 from datetime import datetime, timezone
