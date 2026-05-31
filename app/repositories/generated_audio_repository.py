@@ -114,7 +114,7 @@ class GeneratedAudioRepository:
             GeneratedAudio.duration,
             GeneratedAudio.created_at,
             GeneratedAudio.profile_id,
-            GeneratedAudio.spectrum_frames,
+            GeneratedAudio.waveform,
             Profile.name.label("profile_name")
         ).join(
             Profile, GeneratedAudio.profile_id == Profile.id

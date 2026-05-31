@@ -1,5 +1,5 @@
 # app/api/routers/audio_router.py
-from fastapi import APIRouter, status, Path, Form, Query
+from fastapi import APIRouter, Request, status, Path, Form, Query
 from app.api.deps.services import AudioServiceDep
 from app.schemas.common import CommonResponse
 from app.core.logging import get_logger
@@ -79,6 +79,7 @@ async def change_audio_duration(
     description="Obtiene todos los audios paginados incluyendo el nombre del perfil asociado",
 )
 async def get_audios_paginated(
+    request: Request,
     audio_service: AudioServiceDep,
     page: int = Query(
         1, ge=1, description="Número de página (empieza en 1)"),
@@ -93,7 +94,7 @@ async def get_audios_paginated(
     """
     logger.info(f"GET /audio/audios - page={page}, size={size}")
 
-    result = audio_service.get_audios_paginated(page=page, size=size)
+    result = audio_service.get_audios_paginated(page=page, size=size, request=request)
 
     return CommonResponse.success(
         message="Audios retrieved successfully",

@@ -2,6 +2,7 @@
 import json  
 import io
 import uuid
+from fastapi import Request
 from scipy import signal
 import soundfile as sf
 import re
@@ -231,7 +232,8 @@ class AudioService:
         self,
         page: int = 1,
         size: int = 50,
-        actives = True
+        actives = True,
+        request: Request = None
     ) -> dict:
         """
         Obtiene todos los audios paginados con nombre del perfil.
@@ -258,9 +260,17 @@ class AudioService:
             f"Obteniendo audios paginados - Página: {page}, Tamaño: {size}")
 
         result = self.audio_repo.get_audios_paginated(page=page, size=size, actives=actives)
+        
+        if request and result.get("items"):
+                base_url = str(request.base_url).rstrip('/')
+                for item in result["items"]:
+                    audio_id = item.get("audio_id")
+                    if audio_id:
+                        item["waveform_url"] = f"{base_url}/waveforms/{audio_id}.json"
+                        item["audio_url"] = f"{base_url}/audios/{audio_id}.wav"
 
-        logger.info(
-            f"Audios obtenidos - Total: {result['total']}, Páginas: {result['pages']}")
+        # logger.info(
+        #     f"Audios obtenidos - Total: {result['total']}, Páginas: {result['pages']}")
         return result
     
 
