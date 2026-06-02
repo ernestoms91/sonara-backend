@@ -21,6 +21,7 @@ class GeneratedAudio(SQLModel, table=True):
     profile_id: int = Field(foreign_key="profile.id", index=True)
     active: bool = Field(default=True)
     waveform: str = Field(max_length=1000)
+    created_by: str = Field(max_length=255)
     
    # Relación con Profile (Muchos a Uno) - nombre más claro
     owner_profile: Optional["Profile"] = Relationship(

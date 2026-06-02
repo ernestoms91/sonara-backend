@@ -4,9 +4,11 @@ from pathlib import Path
 from fastapi_pagination import add_pagination
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from requests import auth
 from app.api.errors import  register_exception_handlers
 from app.api.routers.audio_router import router as audio_router
@@ -24,6 +26,7 @@ setup_logging()
 
 # Crear logger para este módulo
 logger = get_logger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

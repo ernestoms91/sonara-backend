@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     
     #LOGGING
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
+    
+    # ESPECTRO DE AUDIO
+    PIXELS_PER_SECOND: int = Field(default=20, env="PIXELS_PER_SECOND", ge=1, le=100)
 
     class Config:
         env_file = ".env"

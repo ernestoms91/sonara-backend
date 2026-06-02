@@ -1,5 +1,6 @@
 # app/api/routers/audio_router.py
 from fastapi import APIRouter, Request, status, Path, Form, Query
+from app.api.deps.auth import CurrentAdmin, CurrentUser
 from app.api.deps.services import AudioServiceDep
 from app.schemas.common import CommonResponse
 from app.core.logging import get_logger
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/audio", tags=["AUDIO"])
     summary="Generar audio a partir de texto usando un perfil de voz clonada",
 )
 async def generate_audio(
+    current_user: CurrentUser,
     audio_service: AudioServiceDep,
     profile_id: int = Path(..., gt=0, description="ID del perfil"),
     text: str = Form(..., min_length=1, max_length=1000,
@@ -26,7 +28,8 @@ async def generate_audio(
     """
     result = audio_service.generate_and_save(
         profile_id=profile_id,
-        text=text
+        text=text,
+        created_by=current_user.full_name
     )
 
     return CommonResponse.success(
@@ -46,6 +49,7 @@ async def generate_audio(
     summary="Cambiar la duración de un audio existente",
 )
 async def change_audio_duration(
+    current_user: CurrentUser,
     audio_service: AudioServiceDep,
     audio_id: str = Path(..., description="UUID del audio original"),
     target_duration: float = Form(..., gt=0.1, le=60.0,
@@ -80,6 +84,7 @@ async def change_audio_duration(
 )
 async def get_audios_paginated(
     request: Request,
+    current_user: CurrentUser,
     audio_service: AudioServiceDep,
     page: int = Query(
         1, ge=1, description="Número de página (empieza en 1)"),
@@ -115,6 +120,7 @@ async def get_audios_paginated(
     description="Obtiene todos los audios inactivos",
 )
 async def get_audios_paginated(
+    current_admin: CurrentAdmin,
     audio_service: AudioServiceDep,
     page: int = Query(
         1, ge=1, description="Número de página (empieza en 1)"),
@@ -152,6 +158,7 @@ async def get_audios_paginated(
     description="Marca un audio como inactivo (active=False) sin eliminarlo físicamente",
 )
 async def soft_delete_audio(
+    current_user: CurrentUser,
     audio_service: AudioServiceDep,
     audio_id: str = Path(..., description="ID del audio a desactivar"),
 ) -> CommonResponse:
@@ -182,6 +189,7 @@ async def soft_delete_audio(
     description="Activa un audio marcado como inactivo (active=True)",
 )
 async def activate_audio(
+    current_admin: CurrentAdmin,
     audio_service: AudioServiceDep,
     audio_id: str = Path(..., description="ID del audio a activar"),
 ) -> CommonResponse:

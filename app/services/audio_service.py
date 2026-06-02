@@ -54,7 +54,7 @@ class AudioService:
         return first_line if first_line else "Audio sin título"
     
     
-    def generate_and_save(self, profile_id: int, text: str) -> dict:
+    def generate_and_save(self, profile_id: int, text: str, created_by: str) -> dict:
         """
         Genera audio y guarda tanto el archivo como los metadatos en BD.
         """
@@ -83,7 +83,7 @@ class AudioService:
         duration = len(audio_array) / sample_rate
         
         # 5. Generar peaks (waveform)
-        peaks = generate_peaks_from_array(audio_array, sample_rate, pixels_per_second=20)
+        peaks = generate_peaks_from_array(audio_array, sample_rate, pixels_per_second=settings.PIXELS_PER_SECOND)
 
         # Crear estructura del JSON
         waveform_data = {
@@ -121,7 +121,8 @@ class AudioService:
             text=text,
             duration=duration,
             title=self._extract_first_sentence(text),
-            waveform=audio_uuid 
+            waveform=audio_uuid,
+            created_by=created_by
         )
         saved_audio = self.audio_repo.create(audio_metadata)
 
