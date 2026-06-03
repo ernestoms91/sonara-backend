@@ -1,6 +1,7 @@
 # app/api/routers/profile_router.py
 from fastapi import APIRouter, Query, status, UploadFile, File, Form, Path
 from app.api.deps import ProfileServiceDep
+from app.api.deps.auth import CurrentAdmin, CurrentUser
 from app.schemas.common import CommonResponse
 from app.core.logging import get_logger
 from app.schemas.profile import ProfileResponse
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/profile", tags=["PROFILE"])
     summary="Crear perfil de voz clonada",
 )
 async def create_profile(
+    current_admin: CurrentAdmin,
     profile_service: ProfileServiceDep,
     name: str = Form(..., min_length=1, description="Nombre del narrador"),
     ref_text: str = Form(..., min_length=1,
@@ -50,6 +52,7 @@ async def create_profile(
     description="Cambia el estado active=False del perfil. No borra archivos físicos."
 )
 async def deactivate_profile(
+    current_admin: CurrentAdmin,
     profile_id: int,
     profile_service: ProfileServiceDep,
 ) -> CommonResponse:
@@ -77,6 +80,7 @@ async def deactivate_profile(
     summary="Verificar archivos y activar perfil",
 )
 async def verify_and_activate_profile(
+    current_admin: CurrentAdmin,
     profile_id: int,
     profile_service: ProfileServiceDep,
 ) -> CommonResponse:
@@ -103,20 +107,23 @@ async def verify_and_activate_profile(
     summary="Listar perfiles con paginación",
 )
 async def list_profiles(
+    current_user: CurrentUser,
     profile_service: ProfileServiceDep,
     page: int = Query(default=1, ge=1, description="Número de página"),
-    size: int = Query(default=50, ge=1, le=1000, description="Items por página"),
-    active_only: bool = Query(default=False, description="Filtrar solo activos")
+    size: int = Query(default=50, ge=1, le=1000,
+                      description="Items por página"),
+    active_only: bool = Query(
+        default=False, description="Filtrar solo activos")
 ) -> CommonResponse:
     """
     Lista perfiles con paginación.
     """
     result = profile_service.get_profiles_paginated(
-        page=page, 
-        size=size, 
+        page=page,
+        size=size,
         active_only=active_only
     )
-    
+
     return CommonResponse.success(
         message="Profiles retrieved successfully",
         data=result
