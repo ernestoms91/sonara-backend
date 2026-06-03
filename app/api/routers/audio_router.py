@@ -1,7 +1,13 @@
 # app/api/routers/audio_router.py
-from fastapi import APIRouter, Request, status, Path, Form, Query
+from fastapi import APIRouter, Request, status, Path, Query
 from app.api.deps.auth import CurrentAdmin, CurrentUser
 from app.api.deps.services import AudioServiceDep
+from app.schemas.audio import (
+    GenerateAudioRequest,
+    ChangeDurationRequest,
+    AudioDataResponse,
+    DurationChangedResponse
+)
 from app.schemas.common import CommonResponse
 from app.core.logging import get_logger
 
@@ -19,27 +25,28 @@ router = APIRouter(prefix="/audio", tags=["AUDIO"])
 async def generate_audio(
     current_user: CurrentUser,
     audio_service: AudioServiceDep,
+    request: GenerateAudioRequest,
     profile_id: int = Path(..., gt=0, description="ID del perfil"),
-    text: str = Form(..., min_length=1, max_length=1000,
-                     description="Texto a sintetizar"),
 ) -> CommonResponse:
     """
     Genera un audio usando la voz clonada del perfil.
     """
     result = audio_service.generate_and_save(
         profile_id=profile_id,
-        text=text,
+        text=request.text,  # ✅ CORREGIDO: usar request.text en lugar de text
         created_by=current_user.full_name
+    )
+
+    response_data = AudioDataResponse(
+        audio_id=result["audio_id"],
+        duration=result["duration"],
+        filename=result["filename"],
+        created_at=result.get("created_at")
     )
 
     return CommonResponse.success(
         message="Audio generated successfully",
-        data={
-            "audio_id": result["audio_id"],
-            "duration": result["duration"],
-            "filename": result["filename"],
-            "created_at": result["created_at"].isoformat() if result["created_at"] else None
-        }
+        data=response_data.model_dump(mode="json")  # mode="json" convierte datetime a isoformat
     )
 
 
@@ -51,28 +58,30 @@ async def generate_audio(
 async def change_audio_duration(
     current_user: CurrentUser,
     audio_service: AudioServiceDep,
+    request: ChangeDurationRequest,
     audio_id: str = Path(..., description="UUID del audio original"),
-    target_duration: float = Form(..., gt=0.1, le=60.0,
-                                  description="Duración deseada en segundos (0.1 - 60)"),
+    
 ) -> CommonResponse:
     """
     Cambia la duración de un audio manteniendo el tono.
     """
     result = audio_service.change_audio_duration(
         audio_id=audio_id,
-        target_duration=target_duration
+        target_duration=request.target_duration
+    )
+
+    response_data = DurationChangedResponse(
+        audio_id=result["audio_id"],
+        original_audio_id=result["original_audio_id"],
+        original_duration=result["original_duration"],
+        new_duration=result["new_duration"],
+        filename=result["filename"],
+        created_at=result.get("created_at")
     )
 
     return CommonResponse.success(
-        message=f"Audio duration changed to {target_duration} seconds",
-        data={
-            "audio_id": result["audio_id"],
-            "original_audio_id": result["original_audio_id"],
-            "original_duration": result["original_duration"],
-            "new_duration": result["new_duration"],
-            "filename": result["filename"],
-            "created_at": result["created_at"].isoformat() if result["created_at"] else None
-        }
+        message=f"Audio duration changed to {request.target_duration} seconds",
+        data=response_data.model_dump(mode="json")
     )
 
 
@@ -86,10 +95,8 @@ async def get_audios_paginated(
     request: Request,
     current_user: CurrentUser,
     audio_service: AudioServiceDep,
-    page: int = Query(
-        1, ge=1, description="Número de página (empieza en 1)"),
-    size: int = Query(
-        50, ge=1, le=100, description="Cantidad de items por página (máx 100)"),
+    page: int = Query(1, ge=1, description="Número de página (empieza en 1)"),
+    size: int = Query(50, ge=1, le=100, description="Cantidad de items por página (máx 100)"),
 ) -> CommonResponse:
     """
     Obtiene todos los audios paginados con nombre del perfil.
@@ -97,7 +104,7 @@ async def get_audios_paginated(
     - **page**: Número de página (default: 1)
     - **size**: Items por página (default: 50, máx: 100)
     """
-    logger.info(f"GET /audio/audios - page={page}, size={size}")
+    logger.info(f"GET /audio/all - page={page}, size={size}")
 
     result = audio_service.get_audios_paginated(page=page, size=size, request=request)
 
@@ -119,13 +126,11 @@ async def get_audios_paginated(
     summary="Obtener lista paginada de audios inactivos",
     description="Obtiene todos los audios inactivos",
 )
-async def get_audios_paginated(
+async def get_inactive_audios_paginated(  # ✅ Renombrada para evitar duplicación
     current_admin: CurrentAdmin,
     audio_service: AudioServiceDep,
-    page: int = Query(
-        1, ge=1, description="Número de página (empieza en 1)"),
-    size: int = Query(
-        50, ge=1, le=100, description="Cantidad de items por página (máx 100)"),
+    page: int = Query(1, ge=1, description="Número de página (empieza en 1)"),
+    size: int = Query(50, ge=1, le=100, description="Cantidad de items por página (máx 100)"),
 ) -> CommonResponse:
     """
     Obtiene todos los audios inactivos paginados con nombre del perfil.
@@ -133,7 +138,7 @@ async def get_audios_paginated(
     - **page**: Número de página (default: 1)
     - **size**: Items por página (default: 50, máx: 100)
     """
-    logger.info(f"GET /audio/audios - page={page}, size={size}")
+    logger.info(f"GET /audio/inactive - page={page}, size={size}")
 
     result = audio_service.get_audios_paginated(
         page=page, size=size, actives=False)
@@ -185,7 +190,7 @@ async def soft_delete_audio(
     "/activate/{audio_id}",
     response_model=CommonResponse,
     status_code=status.HTTP_200_OK,
-    summary="Activa un audio",
+    summary="Activar un audio",
     description="Activa un audio marcado como inactivo (active=True)",
 )
 async def activate_audio(
