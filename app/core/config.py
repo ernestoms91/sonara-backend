@@ -58,6 +58,11 @@ try:
     profiles_path = output_path / "profiles"
     profiles_path.mkdir(parents=True, exist_ok=True)
     logging.info(f"Carpeta de perfiles: {profiles_path.absolute()}")
+    
+    # Crear subcarpeta para audios generados dentro de OUTPUT_DIR
+    genereated_path = output_path / "generated"
+    genereated_path.mkdir(parents=True, exist_ok=True)
+    logging.info(f"Carpeta de perfiles: {genereated_path.absolute()}")
 
     # Crear subcarpeta para waveform dentro de OUTPUT_DIR
     waveform_path = output_path / "waveforms"
