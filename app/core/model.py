@@ -25,15 +25,12 @@ class TTSModel:
     @classmethod
     def _get_model_path(cls):
         """Construir la ruta completa del modelo"""
-        # Combinar MODEL_PATH y MODEL_NAME
         model_path = os.path.join(settings.MODEL_PATH, settings.MODEL_NAME)
         
-        # Si la ruta existe, usarla
         if os.path.exists(model_path):
             logger.debug(f"Usando modelo local: {model_path}")
             return model_path
         
-        # Si no existe localmente, usar el nombre directamente (Hugging Face)
         logger.debug(f"Modelo no encontrado localmente, usando Hugging Face: {settings.MODEL_NAME}")
         return settings.MODEL_NAME
     
@@ -52,23 +49,32 @@ class TTSModel:
             
             logger.info(f"Cargando modelo desde: {model_path}")
             
-            # Configuración según dispositivo
             if device == "cuda":
-                dtype = torch.bfloat16
-                attn = "flash_attention_2"
+                try:
+                    import triton
+                    logger.info("Triton disponible, usando flash_attention_2")
+                    dtype = torch.bfloat16
+                    attn = "flash_attention_2"
+                except ImportError:
+                    logger.warning("Triton no disponible, fallback a eager en CUDA")
+                    dtype = torch.bfloat16
+                    attn = "eager"
             else:
+                # CPU: nunca tocar triton
                 dtype = torch.float32
                 attn = None
             
-            cls._model = Qwen3TTSModel.from_pretrained(
-                model_path,
-                device_map=device,
-                dtype=dtype,
-                attn_implementation=attn,
-            )
+            kwargs = {
+                "device_map": device,
+                "dtype": dtype,
+            }
+            if attn:
+                kwargs["attn_implementation"] = attn
+            
+            cls._model = Qwen3TTSModel.from_pretrained(model_path, **kwargs)
             cls._device = device
             
-            logger.info("Modelo cargado exitosamente")
+            logger.info(f"Modelo cargado | device={device} | dtype={dtype} | attn={attn}")
             return cls._model, cls._device
             
         except Exception as e:
@@ -80,7 +86,6 @@ class TTSModel:
         """Descargar modelo para liberar memoria"""
         if cls._model is not None:
             logger.info("Descargando modelo...")
-            del cls._model
             cls._model = None
             
             if torch.cuda.is_available():

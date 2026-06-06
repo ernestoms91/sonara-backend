@@ -39,44 +39,33 @@ class TTSService:
         torch.serialization.add_safe_globals([VoiceClonePromptItem])
         return torch.load(prompt_path, map_location=settings.DEVICE, weights_only=False)
 
-    def synthesize(self, prompt: VoiceClonePromptItem, text: str) -> tuple:
-        """
-        Sintetiza texto a audio usando un prompt ya cargado.
-
-        Returns:
-            bytes: Audio en formato WAV
-        """
+    def synthesize(self, prompt: VoiceClonePromptItem, text: str, language: str = "Auto") -> tuple:
         logger.info(f"Sintetizando: '{text}'")
-        total_start = time.time()
-        t1 = time.time()
-        # Configurar device
-        if torch.cuda.is_available():
-            autocast_device = "cuda"
-            dtype = torch.float16
-        else:
-            autocast_device = "cpu"
-            dtype = torch.float32
 
-        # Generar audio
+        device = settings.DEVICE.lower()
+
         t2 = time.time()
-        with torch.no_grad(), torch.amp.autocast(autocast_device, dtype=dtype):
-            wavs, sample_rate = self.model.generate_voice_clone(
-                text=text,
-                voice_clone_prompt=prompt,
-                max_new_tokens=min(len(text) * 2, 2048),
-                use_cache=True,
-                do_sample=False,
-                temperature=0.1,
-                top_p=0.9,
-                repetition_penalty=1.0,
-            )
+        if device == "cuda":
+            with torch.no_grad(), torch.amp.autocast("cuda", dtype=torch.float16):
+                wavs, sample_rate = self.model.generate_voice_clone(
+                    text=text,
+                    language=language,
+                    voice_clone_prompt=prompt,
+                    max_new_tokens=min(len(text) * 2, 2048),
+                )
+        else:
+            with torch.no_grad():
+                wavs, sample_rate = self.model.generate_voice_clone(
+                    text=text,
+                    language=language,
+                    voice_clone_prompt=prompt,
+                    max_new_tokens=min(len(text) * 2, 2048),
+                )
         logger.info(f"Generación modelo: {time.time() - t2:.2f}s")
 
-        # Convertir a numpy
         audio = wavs[0] if isinstance(wavs, list) else wavs
         if isinstance(audio, torch.Tensor):
             audio = audio.cpu().numpy()
 
         logger.info(f"Sintetización completada - sample_rate: {sample_rate}")
-
         return audio, sample_rate

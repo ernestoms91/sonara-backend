@@ -79,7 +79,7 @@ class AudioService:
         prompt = self.tts_service.load_prompt(str(prompt_path))
 
         # 4. Generar audio
-        audio_array, sample_rate = self.tts_service.synthesize(prompt, text)
+        audio_array, sample_rate = self.tts_service.synthesize(prompt, text, language=profile.language)
         duration = len(audio_array) / sample_rate
         
         # 5. Generar peaks (waveform)
