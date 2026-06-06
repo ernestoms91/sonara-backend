@@ -11,8 +11,8 @@ class Boletin(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     start_time: datetime = Field(
         description="Fecha y hora de inicio (formato ISO: YYYY-MM-DD HH:MM:SS)"
-    ),
-    
+    )
+    created_by: Optional[str] = Field(default=None, description="Usuario que creó el boletín")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),

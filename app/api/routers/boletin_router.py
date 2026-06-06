@@ -1,5 +1,6 @@
 # app/api/routers/boletin_router.py
 from fastapi import APIRouter, status
+from app.api.deps.auth import CurrentUser
 from app.api.deps.services import BoletinServiceDep
 from app.schemas.common import CommonResponse
 from app.core.logging import get_logger
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/boletin", tags=["BOLETIN"])
     summary="Crear un nuevo boletín con 30 audios",
 )
 async def create_boletin(
+    current_user: CurrentUser,
     boletin_service: BoletinServiceDep,
     request: BoletinCreateRequest,
 ) -> CommonResponse:
@@ -25,7 +27,7 @@ async def create_boletin(
     boletin_service.create(
         start_time=request.start_time,
         audio_ids=request.audio_ids,
-        bol_date=request.bol_date
+        created_by=current_user.full_name
     )
 
     return CommonResponse.success(
@@ -40,6 +42,7 @@ async def create_boletin(
     summary="Actualizar un boletín existente",
 )
 async def update_boletin(
+    current_user: CurrentUser,
     boletin_id: int,
     boletin_service: BoletinServiceDep,
     request: BoletinUpdateRequest,
@@ -66,6 +69,7 @@ async def update_boletin(
     summary="Soft delete de un boletín",
 )
 async def delete_boletin(
+    current_user: CurrentUser,
     boletin_id: int,
     boletin_service: BoletinServiceDep,
 ) -> CommonResponse:
@@ -87,6 +91,7 @@ async def delete_boletin(
     summary="Activar un boletín",
 )
 async def activate_boletin(
+    current_user: CurrentUser,
     boletin_id: int,
     boletin_service: BoletinServiceDep,
 ) -> CommonResponse:

@@ -63,12 +63,13 @@ class BoletinRepository:
         logger.debug(f"Audio_ids encontrados: {len(audio_ids)}")
         return audio_ids
     
-    def create(self, start_time: str, active: bool = True) -> Boletin:
+    def create(self, start_time: str, created_by: str, active: bool = True) -> Boletin:
         """Crear un nuevo boletín"""
         logger.info(f"Creando boletín con start_time: {start_time}, active: {active}")
         boletin = Boletin(
             start_time=start_time,
-            active=active
+            active=active,
+            created_by=created_by
         )
         self.db.add(boletin)
         self.db.commit()

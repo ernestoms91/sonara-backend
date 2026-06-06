@@ -1,49 +1,37 @@
 # app/schemas/boletin.py
 from pydantic import BaseModel, Field, field_validator
 from typing import List
-import re
-
+from datetime import datetime
 
 class BoletinCreateRequest(BaseModel):
-    """Schema para crear un boletín"""
-    start_time: str = Field(..., min_length=5, max_length=5, description="Horario HH:MM")
-    audio_ids: List[str] = Field(..., min_length=30, max_length=30, description="Lista de 30 IDs de audios")
-    bol_date: str = Field(..., min_length=10, max_length=10, description="Fecha del boletín en formato YYYY-MM-DD")
+    start_time: datetime = Field(..., description="Fecha y hora ISO 8601")
+    audio_ids: List[str] = Field(..., min_length=30, max_length=30)
     
     @field_validator("start_time")
-    @classmethod
-    def validate_start_time(cls, v: str) -> str:
-        """Validar formato HH:MM"""
-
-        if not re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', v):
-            raise ValueError(f"Formato inválido: {v}. Use HH:MM (ej: 06:00, 23:30)")
-        return v
-    
-    @field_validator("bol_date")
-    @classmethod
-    def validate_bol_date(cls, v: str) -> str:
-        """Validar formato YYYY-MM-DD"""
-        if not re.match(r'^\d{4}-\d{2}-\d{2}$', v):
-            raise ValueError(f"Formato inválido: {v}. Use YYYY-MM-DD (ej: 2026-05-03)")
+    @classmethod  # ← Añadir esto
+    def validate_start_time(cls, v: datetime) -> datetime:  # ← cls en lugar de self
+        # Validar minutos 00 o 30
+        if v.minute not in [0, 30]:
+            raise ValueError(f"Los minutos deben ser 00 o 30. Recibido: {v.minute:02d}")
         
-        # Validar que sea una fecha real (días, meses válidos)
-        try:
-            year, month, day = map(int, v.split('-'))
-            from datetime import date
-            date(year, month, day)  # Si es inválido, lanza ValueError
-        except ValueError:
-            raise ValueError(f"Fecha inválida: {v}. Verifique año, mes o día")
+        # Normalizar segundos a 0
+        if v.second != 0 or v.microsecond != 0:
+            v = v.replace(second=0, microsecond=0)
         
         return v
     
     @field_validator("audio_ids")
-    @classmethod
-    def validate_audio_ids(cls, v: List[str]) -> List[str]:
-        """Validar que no haya duplicados"""
+    @classmethod  # ← Añadir esto también
+    def validate_audio_ids(cls, v: List[str]) -> List[str]:  # ← cls
+        # Validar que no haya duplicados
         if len(set(v)) != len(v):
             raise ValueError("No se permiten IDs duplicados en la lista")
+        
+        # Validar cantidad exacta
+        if len(v) != 30:
+            raise ValueError(f"Debe tener exactamente 30 audios. Tiene: {len(v)}")
+        
         return v
-    
 
 class BoletinUpdateRequest(BaseModel):
     """Schema para actualizar un boletín"""

@@ -1,4 +1,5 @@
 # app/services/boletin_service.py
+from datetime import datetime
 from pathlib import Path
 import re
 from networkx import enumerate_all_cliques
@@ -34,115 +35,137 @@ class BoletinService:
         return clean.splitlines()[0].strip()[:200]
 
     def create(
-        self,
-        bol_date,
-        start_time: str,
-        audio_ids: List[str],  # Lista de 30 IDs de audios
-    ) -> Boletin:
-        """
-        Crear un nuevo boletín con una lista de audios asociados.
+            self,
+            start_time: datetime,  
+            audio_ids: List[str],
+            created_by: str
+        ) -> Boletin:
+            """
+            Crear un nuevo boletín con una lista de audios asociados.
 
-        Args:
-            start_time: Horario de inicio del boletín (ej: "06:00")
-            audio_ids: Lista de 30 IDs de audios (debe tener exactamente 30)
+            Args:
+                start_time: Fecha y hora de inicio (datetime, minutos deben ser 00 o 30)
+                audio_ids: Lista de 30 IDs de audios (debe tener exactamente 30)
 
-        Returns:
-            Boletin: El boletín creado con sus audios asociados
-        """
-        # 1. Validar cantidad de audios
-        if len(audio_ids) != 30:
-            raise ValueError(
-                f"Se requieren exactamente 30 audios para un boletín completo. "
-                f"Recibidos: {len(audio_ids)}"
-            )
-
-        # 2. Validar que todos los audios existen en la BD
-
-        for audio_id in audio_ids:
-            audio = self.audio_repo.get_by_audio_id(audio_id, active=True)
-            if not audio or audio["active"] == False:
+            Returns:
+                Boletin: El boletín creado con sus audios asociados
+            """
+            # 1. Validar cantidad de audios
+            if len(audio_ids) != 30:
                 raise ValueError(
-                    f"Audio con ID {audio_id} no encontrado o inactivo")
+                    f"Se requieren exactamente 30 audios para un boletín completo. "
+                    f"Recibidos: {len(audio_ids)}"
+                )
 
-        # 3. Crear cada audio del boletin con la hora exacta
-        boletin = self.boletin_repo.create(start_time=start_time)
-        hour = int(start_time.split(":")[0])
-        hour_str = start_time.replace(":", "-")
-        for index, audio_id in enumerate(audio_ids):
-            audio_obj = self.audio_repo.get_by_audio_id_with_relationship(audio_id)
-            folder_id = audio_obj.owner_profile.folder_id
-            conector_rreloj = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/Connectors/rreloj.mp3"
-            hours_path = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/Hours/{hour}.mp3"
+            # 2. Validar que todos los audios existen y tienen duración suficiente
+            for audio_id in audio_ids:
+                audio = self.audio_repo.get_by_audio_id(audio_id, active=True)
+                if not audio or audio["active"] == False:
+                    raise ValueError(f"Audio con ID {audio_id} no encontrado o inactivo")
+                
+                # Validar duración mínima
+                duracion_audio = audio.get("duration", 0)
+                if duracion_audio < 40:  # Mínimo 10 segundos
+                    raise ValueError(
+                        f"Audio {audio.get("id")} tiene duración insuficiente: {duracion_audio:.2f}s. "
+                        f"Mínimo requerido: 40s para poder ajustarlo a 60s sin distorsión"
+                    )
+
+            # 3. Crear el boletín en la BD
+            boletin = self.boletin_repo.create(start_time=start_time, created_by=created_by)
             
-             # Para las 12:00, verificar si es AM o PM según el contexto
-            if start_time == "12:00":
-            # Asumiendo que "12:00" solo puede ser mediodía o medianoche
-            # Por defecto usamos "12 PM.mp3" para mediodía
-                hour_filename = "12 PM.mp3"
-            elif start_time == "00:00":
-                hour_filename = "12 AM.mp3"
-            else:
-                hour_filename = f"{hour}.mp3"
-                        
-            mins_path = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/Min/{hour_filename}.mp3"
-            audio_path = f"{settings.OUTPUT_DIR}/generated/{audio_id}.wav"
-
-            # Ruta de salida para este minuto
-            output_filename = f"{index:02d}.mp3"
-            output_path = f"{settings.OUTPUT_DIR}/boletines/{bol_date}/{hour_str}/temp/{output_filename}"
-            final_audio_output_path = f"{settings.OUTPUT_DIR}/boletines/{bol_date}/{hour_str}/{output_filename}"
-
-            # Verificar que todos los archivos existen
-            missing_files = []
-            for file_path in [conector_rreloj, hours_path, mins_path, audio_path]:
-                if not Path(file_path).exists():
-                    missing_files.append(file_path)
-
-            if missing_files:
-                logger.warning(f"Faltan archivos para minuto {index}: {missing_files}")
-                continue
-
-            time_path = AudioMerger.merge_audio_files(
-                audio_paths=[hours_path, mins_path],
-                output_path=output_path,
-                output_format="mp3",
-                crossfade_ms=0,
-            )
-
-            duration_time_path = AudioMerger.get_duration_seconds(time_path)
-            duration_conector_rreloj = AudioMerger.get_duration(conector_rreloj)
-            remaining_seconds = 60.0 - duration_time_path - duration_conector_rreloj
-
-            title = self._extract_title(audio_obj.text)
-
-
-            output_audios_path = f"{settings.OUTPUT_DIR}/boletines/{bol_date}/{hour_str}/temp/{audio_id}.mp3"
-            info_path = AudioMerger.adjust_duration(
-                input_path=audio_path,
-                output_path=output_audios_path,
-                target_seconds=remaining_seconds,
-                output_format="mp3",
-                tags={"title": title},
-            )
-
-            final_audio = AudioMerger.concatenate_audio_files(
-                audio_paths=[time_path, info_path, conector_rreloj],
-                output_path=final_audio_output_path,
-                output_format="mp3",
-                crossfade_ms=0,
-                tags={"title": title},
-            )
-            final_audio = AudioMerger.enforce_duration(
-                audio_path=final_audio,
-                output_path=final_audio_output_path,
-                target_seconds=60.0,
-                output_format="mp3",
-                tags={"title": title},
-            )
-            duracion_final = AudioMerger.get_duration_seconds(final_audio)
-            logger.info(f"Archivo de audio {index}: {duracion_final:.2f}s")
-
-        return boletin
+            # 4. Extraer fecha y hora del datetime
+            bol_date = start_time.strftime("%Y-%m-%d")  # Formato: YYYY-MM-DD
+            hour = start_time.hour                       # Hora en 24h (0-23)
+            minute = start_time.minute                   # Minuto (0 o 30)
+            hour_str = start_time.strftime("%H-%M")      # Formato: HH-MM (ej: 06-00, 18-30)
+            
+            # 5. Crear directorio base si no existe
+            base_boletin_dir = Path(settings.OUTPUT_DIR) / "boletines" / bol_date / hour_str
+            temp_dir = base_boletin_dir / "temp"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 6. Procesar cada audio del boletín
+            for index, audio_id in enumerate(audio_ids):
+                audio_obj = self.audio_repo.get_by_audio_id_with_relationship(audio_id)
+                folder_id = audio_obj.owner_profile.folder_id
+                
+                # Rutas de archivos fuente
+                conector_rreloj = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Connectors/rreloj.mp3"
+                
+                # Determinar el archivo de hora correcto (manejar AM/PM)
+                if hour == 12:
+                    hour_filename = "12 PM"
+                elif hour == 0:
+                    hour_filename = "12 AM"
+                else:
+                    hour_filename = f"{hour}"
+                
+                hours_path = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Hours/{hour}.mp3"
+                mins_path = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Minutes/{hour_filename}.mp3"
+                audio_path = Path(settings.OUTPUT_DIR) / f"generated/{audio_id}.wav"
+                
+                # Rutas de salida
+                output_filename = f"{index:02d}.mp3"
+                output_path = temp_dir / output_filename
+                final_audio_output_path = base_boletin_dir / output_filename
+                
+                # Verificar que todos los archivos existen
+                missing_files = []
+                for file_path in [conector_rreloj, hours_path, mins_path, audio_path]:
+                    if not Path(file_path).exists():
+                        missing_files.append(str(file_path))
+                
+                if missing_files:
+                    logger.warning(f"Faltan archivos para minuto {index}: {missing_files}")
+                    continue
+                
+                # Merge de hours + mins
+                time_path = AudioMerger.merge_audio_files(
+                    audio_paths=[str(hours_path), str(mins_path)],
+                    output_path=str(output_path),
+                    output_format="mp3",
+                    crossfade_ms=0,
+                )
+                
+                duration_time_path = AudioMerger.get_duration_seconds(time_path)
+                duration_conector_rreloj = AudioMerger.get_duration(str(conector_rreloj))
+                remaining_seconds = 60.0 - duration_time_path - duration_conector_rreloj
+                
+                title = self._extract_title(audio_obj.text)
+                
+                # Ajustar duración del audio
+                output_audios_path = temp_dir / f"{audio_id}.mp3"
+                info_path = AudioMerger.adjust_duration(
+                    input_path=str(audio_path),
+                    output_path=str(output_audios_path),
+                    target_seconds=remaining_seconds,
+                    output_format="mp3",
+                    tags={"title": title},
+                )
+                
+                # Concatenar todos los audios
+                final_audio = AudioMerger.concatenate_audio_files(
+                    audio_paths=[time_path, info_path, str(conector_rreloj)],
+                    output_path=str(final_audio_output_path),
+                    output_format="mp3",
+                    crossfade_ms=0,
+                    tags={"title": title},
+                )
+                
+                # Forzar duración exacta de 60 segundos
+                final_audio = AudioMerger.enforce_duration(
+                    audio_path=final_audio,
+                    output_path=str(final_audio_output_path),
+                    target_seconds=60.0,
+                    output_format="mp3",
+                    tags={"title": title},
+                )
+                
+                duracion_final = AudioMerger.get_duration_seconds(final_audio)
+                logger.info(f"Archivo de audio {index}: {duracion_final:.2f}s")
+            
+            return boletin
 
 
     def update(
