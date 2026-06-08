@@ -51,29 +51,34 @@ class TTSModel:
             
             if device == "cuda":
                 try:
-                    import triton
-                    logger.info("Triton disponible, usando flash_attention_2")
+                    import flash_attn
+                    logger.info("flash-attn disponible, usando flash_attention_2")
                     dtype = torch.bfloat16
                     attn = "flash_attention_2"
                 except ImportError:
-                    logger.warning("Triton no disponible, fallback a eager en CUDA")
+                    logger.warning("flash-attn no disponible, fallback a eager")
                     dtype = torch.bfloat16
                     attn = "eager"
             else:
-                # CPU: nunca tocar triton
                 dtype = torch.float32
                 attn = None
             
-            kwargs = {
-                "device_map": device,
-                "dtype": dtype,
-            }
+            kwargs = {"device_map": device, "dtype": dtype}
             if attn:
                 kwargs["attn_implementation"] = attn
             
             cls._model = Qwen3TTSModel.from_pretrained(model_path, **kwargs)
-            cls._device = device
             
+            # Aplicar Triton kernels si estamos en CUDA
+            if device == "cuda":
+                try:
+                    from qwen3_tts_triton.models.patching import apply_triton_kernels
+                    apply_triton_kernels(cls._model.model)
+                    logger.info("Triton kernels aplicados (RMSNorm, SwiGLU, M-RoPE, Norm+Residual)")
+                except Exception as e:
+                    logger.warning(f"No se pudieron aplicar Triton kernels: {e}")
+            
+            cls._device = device
             logger.info(f"Modelo cargado | device={device} | dtype={dtype} | attn={attn}")
             return cls._model, cls._device
             
