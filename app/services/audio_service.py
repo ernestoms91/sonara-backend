@@ -82,10 +82,6 @@ class AudioService:
         sample_rate: int,
         max_duration: float = 60.0
     ) -> np.ndarray:
-        """
-        Si el audio supera max_duration, lo comprime con rubberband preservando pitch.
-        Si es menor o igual, lo deja como está.
-        """
         current_duration = len(audio_array) / sample_rate
 
         if current_duration <= max_duration:
@@ -133,9 +129,13 @@ class AudioService:
 
         audio_array, sample_rate = self.tts_service.synthesize(prompt, text, language=profile.language)
 
+        # Guardar duración original antes de comprimir
+        raw_duration = len(audio_array) / sample_rate
+
         # Comprimir si supera 60 segundos
         audio_array = self._enforce_max_duration(audio_array, sample_rate, max_duration=60.0)
         duration = len(audio_array) / sample_rate
+        was_compressed = raw_duration > 60.0
 
         peaks = generate_peaks_from_array(audio_array, sample_rate, pixels_per_second=settings.PIXELS_PER_SECOND)
 
@@ -167,7 +167,10 @@ class AudioService:
             duration=duration,
             title=self._extract_first_sentence(text),
             waveform=audio_uuid,
-            created_by=created_by
+            created_by=created_by,
+            original_duration=raw_duration,
+            was_compressed=was_compressed,
+            character_count=len(text)
         )
         saved_audio = self.audio_repo.create(audio_metadata)
 
@@ -181,6 +184,9 @@ class AudioService:
             "audio_bytes": audio_bytes,
             "filename": filename,
             "duration": duration,
+            "original_duration": raw_duration,
+            "was_compressed": was_compressed,
+            "character_count": len(text),
             "created_at": saved_audio.created_at,
             "waveform": waveform_data
         }
@@ -229,9 +235,16 @@ class AudioService:
             language=language
         )
 
+        # Guardar duración original antes de comprimir
+        raw_duration = len(audio_array) / sample_rate
+
         # Comprimir si supera 60 segundos
         audio_array = self._enforce_max_duration(audio_array, sample_rate, max_duration=60.0)
         duration = len(audio_array) / sample_rate
+        was_compressed = raw_duration > 60.0
+
+        # character_count para dueto: suma de todos los párrafos
+        character_count = sum(len(p) for p in paragraphs)
 
         audio_uuid = str(uuid.uuid4())
         self.audios_base_dir.mkdir(parents=True, exist_ok=True)
@@ -269,7 +282,10 @@ class AudioService:
             duration=duration,
             title=f"Dueto: {profile_a.name} & {profile_b.name} - {self._extract_first_sentence(paragraphs[0])}",
             waveform=audio_uuid,
-            created_by=created_by
+            created_by=created_by,
+            original_duration=raw_duration,
+            was_compressed=was_compressed,
+            character_count=character_count
         )
         saved_audio = self.audio_repo.create(audio_metadata)
 
@@ -283,6 +299,9 @@ class AudioService:
             "audio_bytes": audio_bytes,
             "filename": filename,
             "duration": duration,
+            "original_duration": raw_duration,
+            "was_compressed": was_compressed,
+            "character_count": character_count,
             "created_at": saved_audio.created_at,
             "waveform": waveform_data,
             "profile_a": profile_a.name,
@@ -357,7 +376,10 @@ class AudioService:
             duration=new_duration,
             title=audio_info.get("title", ""),
             waveform=new_audio_uuid,
-            created_by=audio_info.get("created_by", "system")
+            created_by=audio_info.get("created_by", "system"),
+            original_duration=current_duration,
+            was_compressed=True,
+            character_count=audio_info.get("character_count", 0)
         )
         saved_audio = self.audio_repo.create(new_audio_metadata)
 

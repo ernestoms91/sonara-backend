@@ -42,6 +42,9 @@ async def generate_audio(
     response_data = AudioDataResponse(
         audio_id=result["audio_id"],
         duration=result["duration"],
+        original_duration=result.get("original_duration"),
+        was_compressed=result.get("was_compressed", False),
+        character_count=result.get("character_count", 0),
         filename=result["filename"],
         created_at=result.get("created_at")
     )
@@ -87,6 +90,9 @@ async def generate_duet_audio(
     response_data = DuetAudioDataResponse(
         audio_id=result["audio_id"],
         duration=result["duration"],
+        original_duration=result.get("original_duration"),
+        was_compressed=result.get("was_compressed", False),
+        character_count=result.get("character_count", 0),
         filename=result["filename"],
         created_at=result.get("created_at"),
         profile_a=result["profile_a"],

@@ -5,7 +5,6 @@ from typing import Optional
 from uuid import UUID
 
 
-# --- Request Schemas ---
 class GenerateAudioRequest(BaseModel):
     text: str = Field(
         ...,
@@ -65,10 +64,12 @@ class ChangeDurationRequest(BaseModel):
     )
 
 
-# --- Response Schemas ---
 class AudioDataResponse(BaseModel):
     audio_id: UUID
     duration: float
+    original_duration: Optional[float] = None
+    was_compressed: bool = False
+    character_count: int = 0
     filename: str
     created_at: Optional[datetime] = None
 
@@ -76,6 +77,9 @@ class AudioDataResponse(BaseModel):
 class DuetAudioDataResponse(BaseModel):
     audio_id: UUID
     duration: float
+    original_duration: Optional[float] = None
+    was_compressed: bool = False
+    character_count: int = 0
     filename: str
     created_at: Optional[datetime] = None
     profile_a: str

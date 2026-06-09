@@ -1,36 +1,26 @@
 # app/models/generated_audio_model.py
-from sqlmodel import Relationship, SQLModel, Field, JSON, Column
-from typing import List, Optional
-from datetime import datetime, timezone
 
-from app.models.boletin_audio_link import BoletinAudioLink
-
+from sqlmodel import SQLModel, Field
+from datetime import datetime
+from uuid import UUID, uuid4
+from typing import Optional
+import sqlalchemy as sa
 
 class GeneratedAudio(SQLModel, table=True):
-    __tablename__ = "generated_audio"
-    
+    __tablename__ = "generated_audios"
+
     id: Optional[int] = Field(default=None, primary_key=True)
-    audio_id: str = Field(
-        unique=True, 
-        index=True,
-        description="UUID único para identificar el audio"
-    )
-    text: str = Field(max_length=1000)
-    duration: float  # segundos
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    profile_id: int = Field(foreign_key="profile.id", index=True)
+    audio_id: UUID = Field(default_factory=uuid4, unique=True, index=True)
+    profile_id: int = Field(foreign_key="profiles.id", index=True)
+    text: str = Field(sa_type=sa.Text)
+    title: Optional[str] = None
+    duration: float  # Duración final del audio en segundos
+    waveform: Optional[str] = None  # UUID del waveform
+    created_by: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.now)
     active: bool = Field(default=True)
-    waveform: str = Field(max_length=1000)
-    created_by: str = Field(max_length=255)
     
-   # Relación con Profile (Muchos a Uno) - nombre más claro
-    owner_profile: Optional["Profile"] = Relationship(
-        back_populates="owned_audios"
-    )
-
-
-     # Relación muchos a muchos (inversa)
-    boletines: List["Boletin"] = Relationship(
-        back_populates="audios",
-        link_model=BoletinAudioLink
-    )
+    # NUEVOS CAMPOS
+    original_duration: Optional[float] = None  # Duración original antes de comprimir
+    was_compressed: bool = Field(default=False)  # Si fue comprimido o no
+    character_count: int = Field(default=0)  # Cantidad de caracteres del texto original
