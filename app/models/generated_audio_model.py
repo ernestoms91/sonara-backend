@@ -6,6 +6,8 @@ from uuid import UUID, uuid4
 from typing import List, Optional
 import sqlalchemy as sa
 
+from app.models.boletin_audio_link import BoletinAudioLink
+
 class GeneratedAudio(SQLModel, table=True):
     __tablename__ = "generated_audios"
 
@@ -29,5 +31,5 @@ class GeneratedAudio(SQLModel, table=True):
     
     boletines: List["Boletin"] = Relationship(
         back_populates="audios",
-        link_model="BoletinAudioLink"
+        link_model=BoletinAudioLink
     )

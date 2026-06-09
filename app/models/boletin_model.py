@@ -2,7 +2,6 @@
 from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
 from datetime import datetime, timezone
-from app.models.generated_audio_model import GeneratedAudio
 from app.models.boletin_audio_link import BoletinAudioLink
 
 class Boletin(SQLModel, table=True):
