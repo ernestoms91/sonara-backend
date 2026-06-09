@@ -3,7 +3,7 @@
 from sqlmodel import SQLModel, Field, Relationship  
 from datetime import datetime
 from uuid import UUID, uuid4
-from typing import Optional
+from typing import List, Optional
 import sqlalchemy as sa
 
 class GeneratedAudio(SQLModel, table=True):
