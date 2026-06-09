@@ -2,7 +2,7 @@
 import json  
 import io
 import uuid
-import librosa
+import pyrubberband as pyrb
 from fastapi import Request
 from scipy import signal
 import soundfile as sf
@@ -83,7 +83,7 @@ class AudioService:
         max_duration: float = 60.0
     ) -> np.ndarray:
         """
-        Si el audio supera max_duration, lo comprime con librosa preservando pitch.
+        Si el audio supera max_duration, lo comprime con rubberband preservando pitch.
         Si es menor o igual, lo deja como está.
         """
         current_duration = len(audio_array) / sample_rate
@@ -92,15 +92,15 @@ class AudioService:
             logger.info(f"Duración {current_duration:.2f}s dentro del límite, sin ajuste")
             return audio_array.astype(np.float32)
 
-        rate = current_duration / max_duration  # siempre >1, acelera
+        rate = current_duration / max_duration
         logger.info(f"Comprimiendo audio: {current_duration:.2f}s → {max_duration:.2f}s (rate={rate:.3f})")
 
-        audio_compressed = librosa.effects.time_stretch(
+        audio_compressed = pyrb.time_stretch(
             audio_array.astype(np.float32),
-            rate=rate
+            sample_rate,
+            rate
         )
 
-        # Ajustar samples exactos
         max_samples = int(round(max_duration * sample_rate))
         if len(audio_compressed) > max_samples:
             audio_compressed = audio_compressed[:max_samples]
@@ -311,9 +311,10 @@ class AudioService:
         rate = current_duration / target_duration
         logger.info(f"Aplicando time stretch con rate={rate:.3f}")
 
-        audio_resampled = librosa.effects.time_stretch(
+        audio_resampled = pyrb.time_stretch(
             audio_array.astype(np.float32),
-            rate=rate
+            sample_rate,
+            rate
         )
 
         target_samples = int(round(target_duration * sample_rate))
