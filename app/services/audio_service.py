@@ -2,6 +2,7 @@
 import json  
 import io
 import uuid
+import librosa
 from fastapi import Request
 from scipy import signal
 import soundfile as sf
@@ -32,7 +33,6 @@ class AudioService:
     def _extract_first_sentence(self, text: str) -> str:
         if not text:
             return "Audio sin título"
-
         clean = text.strip()
         match = re.search(r"(.+?[\.\!\?])(?:\s|$)", clean)
         if match:
@@ -40,17 +40,12 @@ class AudioService:
             if len(first_sentence) > 60:
                 first_sentence = first_sentence[:57] + "..."
             return first_sentence
-
         first_line = clean.splitlines()[0].strip()
         if len(first_line) > 60:
             first_line = first_line[:57] + "..."
         return first_line if first_line else "Audio sin título"
 
     def _extract_paragraphs_from_markers(self, text: str) -> list[str]:
-        """
-        Extrae párrafos marcados como [P1], [P2], ... [Pn] dinámicamente.
-        """
-        # Detectar cuántos marcadores existen
         markers = re.findall(r'\[P(\d+)\]', text, re.IGNORECASE)
         if not markers:
             raise ValueError("No se encontraron marcadores [Pn] en el texto")
@@ -65,9 +60,8 @@ class AudioService:
                 pattern = rf'\[P{i}\](.*?)$'
 
             match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-
             if not match:
-                raise ValueError(f"No se encontró el marcador [P{i}] en el texto")
+                raise ValueError(f"No se encontró el marcador [P{i}]")
 
             paragraph = match.group(1).strip()
             if not paragraph:
@@ -82,14 +76,49 @@ class AudioService:
 
         return paragraphs
 
+    def _normalize_duration(
+        self,
+        audio_array: np.ndarray,
+        sample_rate: int,
+        target_duration: float = 60.0
+    ) -> np.ndarray:
+        """
+        Ajusta el audio a exactamente target_duration segundos usando
+        time stretching con preservación de pitch (librosa).
+        Para cambios de hasta ±20% es prácticamente transparente.
+        """
+        current_duration = len(audio_array) / sample_rate
+
+        if abs(current_duration - target_duration) < 0.01:
+            logger.info(f"Duración ya es {current_duration:.2f}s, sin ajuste necesario")
+            return audio_array.astype(np.float32)
+
+        rate = current_duration / target_duration  # >1 acelera, <1 frena
+        logger.info(f"Normalizando duración: {current_duration:.2f}s → {target_duration:.2f}s (rate={rate:.3f})")
+
+        audio_stretched = librosa.effects.time_stretch(
+            audio_array.astype(np.float32),
+            rate=rate
+        )
+
+        # Recortar o rellenar por si librosa produce diferencia de samples
+        target_samples = int(round(target_duration * sample_rate))
+        if len(audio_stretched) > target_samples:
+            audio_stretched = audio_stretched[:target_samples]
+        elif len(audio_stretched) < target_samples:
+            audio_stretched = np.pad(audio_stretched, (0, target_samples - len(audio_stretched)))
+
+        max_abs = np.max(np.abs(audio_stretched))
+        if max_abs > 0:
+            audio_stretched = audio_stretched / max_abs * 0.95
+
+        logger.info(f"Duración final: {len(audio_stretched) / sample_rate:.2f}s")
+        return audio_stretched.astype(np.float32)
+
     def generate_and_save(self, profile_id: int, text: str, created_by: str) -> dict:
-        """
-        Genera audio y guarda tanto el archivo como los metadatos en BD.
-        """
         profile = self.profile_repo.get_by_id(profile_id)
         if not profile:
             raise ValueError(f"Perfil {profile_id} no encontrado")
-
         if not profile.active:
             raise ValueError(f"Perfil {profile_id} no está activo")
 
@@ -104,6 +133,9 @@ class AudioService:
         prompt = self.tts_service.load_prompt(str(prompt_path))
 
         audio_array, sample_rate = self.tts_service.synthesize(prompt, text, language=profile.language)
+
+        # Normalizar a 60 segundos exactos
+        audio_array = self._normalize_duration(audio_array, sample_rate, target_duration=60.0)
         duration = len(audio_array) / sample_rate
 
         peaks = generate_peaks_from_array(audio_array, sample_rate, pixels_per_second=settings.PIXELS_PER_SECOND)
@@ -112,24 +144,20 @@ class AudioService:
             "sample_rate": sample_rate,
             "bits": 8,
             "duration": float(duration),
-            "channels": 1 if len(audio_array.shape) == 1 else 2,
+            "channels": 1 if audio_array.ndim == 1 else 2,
             "pixels_per_second": 20,
             "data_overview_length": len(peaks),
             "data": peaks,
         }
 
-        waveform_filename = f"{audio_uuid}.json"
-        waveform_path = self.waveforms_base_dir / waveform_filename
-
+        waveform_path = self.waveforms_base_dir / f"{audio_uuid}.json"
         with open(waveform_path, "w", encoding="utf-8") as f:
             json.dump(waveform_data, f, ensure_ascii=False)
-
         logger.info(f"Waveform guardado en: {waveform_path}")
 
         self.audios_base_dir.mkdir(parents=True, exist_ok=True)
         filename = f"{audio_uuid}.wav"
         audio_path = self.audios_base_dir / filename
-
         sf.write(audio_path, audio_array, sample_rate)
         logger.info(f"Audio guardado en: {audio_path}")
 
@@ -165,10 +193,6 @@ class AudioService:
         text_with_markers: str,
         created_by: str
     ) -> dict:
-        """
-        Genera audio con dos voces alternadas por párrafo usando marcadores [Pn].
-        Los párrafos impares van al locutor A, los pares al locutor B.
-        """
         paragraphs = self._extract_paragraphs_from_markers(text_with_markers)
 
         profile_a = self.profile_repo.get_by_id(profile_a_id)
@@ -182,12 +206,16 @@ class AudioService:
         language = profile_a.language
         if profile_a.language != profile_b.language:
             logger.warning(f"Idiomas diferentes: A={profile_a.language}, B={profile_b.language}. Usando idioma de A.")
+        
+        if profile_a.model_type != profile_b.model_type:
+            raise ValueError(
+                f"No se puede generar dueto. Los perfiles usan diferentes modelos: "
+                f"A={profile_a.model_type}, B={profile_b.model_type}. "
+                f"Ambos deben usar el mismo tipo de modelo."
+            )
 
-        profile_a_folder = Path(settings.OUTPUT_DIR) / "profiles" / profile_a.folder_id
-        prompt_a_path = profile_a_folder / f"{profile_a.name.lower()}.pt"
-
-        profile_b_folder = Path(settings.OUTPUT_DIR) / "profiles" / profile_b.folder_id
-        prompt_b_path = profile_b_folder / f"{profile_b.name.lower()}.pt"
+        prompt_a_path = Path(settings.OUTPUT_DIR) / "profiles" / profile_a.folder_id / f"{profile_a.name.lower()}.pt"
+        prompt_b_path = Path(settings.OUTPUT_DIR) / "profiles" / profile_b.folder_id / f"{profile_b.name.lower()}.pt"
 
         if not prompt_a_path.exists():
             raise FileNotFoundError(f"Prompt no encontrado: {prompt_a_path}")
@@ -197,7 +225,6 @@ class AudioService:
         prompt_a = self.tts_service.load_prompt(str(prompt_a_path))
         prompt_b = self.tts_service.load_prompt(str(prompt_b_path))
 
-        # Párrafos impares → A, pares → B (dinámico)
         duet_paragraphs = [
             {"speaker": "A" if (i % 2 == 0) else "B", "text": p}
             for i, p in enumerate(paragraphs)
@@ -210,6 +237,8 @@ class AudioService:
             language=language
         )
 
+        # Normalizar a 60 segundos exactos
+        audio_array = self._normalize_duration(audio_array, sample_rate, target_duration=60.0)
         duration = len(audio_array) / sample_rate
 
         audio_uuid = str(uuid.uuid4())
@@ -225,14 +254,13 @@ class AudioService:
             "sample_rate": sample_rate,
             "bits": 8,
             "duration": float(duration),
-            "channels": 1 if len(audio_array.shape) == 1 else 2,
+            "channels": 1 if audio_array.ndim == 1 else 2,
             "pixels_per_second": 20,
             "data_overview_length": len(peaks),
             "data": peaks,
         }
 
-        waveform_filename = f"{audio_uuid}.json"
-        waveform_path = self.waveforms_base_dir / waveform_filename
+        waveform_path = self.waveforms_base_dir / f"{audio_uuid}.json"
         with open(waveform_path, "w", encoding="utf-8") as f:
             json.dump(waveform_data, f, ensure_ascii=False)
         logger.info(f"Waveform dueto guardado en: {waveform_path}")
@@ -270,9 +298,6 @@ class AudioService:
         }
 
     def change_audio_duration(self, audio_id: str, target_duration: float) -> dict:
-        """
-        Cambia la duración de un audio usando scipy.signal.resample.
-        """
         audio_info = self.audio_repo.get_by_id(audio_id)
         if not audio_info:
             raise ValueError(f"Audio {audio_id} no encontrado")
@@ -291,25 +316,16 @@ class AudioService:
         logger.info(f"Original: duración={current_duration:.4f}s, sample_rate={sample_rate}")
         logger.info(f"Target: duración={target_duration:.4f}s")
 
-        new_length = int(round(target_duration * sample_rate))
-        audio_resampled = signal.resample(audio_array, new_length)
-
-        if audio_resampled.size == 0:
-            raise RuntimeError("Resample produjo un audio vacío")
-
-        max_abs = np.max(np.abs(audio_resampled))
-        if max_abs > 0:
-            audio_resampled = audio_resampled / max_abs * 0.95
+        # Usar librosa para preservar pitch
+        audio_resampled = self._normalize_duration(audio_array, sample_rate, target_duration=target_duration)
+        new_duration = len(audio_resampled) / sample_rate
 
         new_audio_uuid = str(uuid.uuid4())
         new_filename = f"{new_audio_uuid}.wav"
         new_audio_path = self.audios_base_dir / new_filename
-        sf.write(new_audio_path, audio_resampled.astype(np.float32), sample_rate, subtype='PCM_16')
-
-        new_duration = len(audio_resampled) / sample_rate
+        sf.write(new_audio_path, audio_resampled, sample_rate)
         logger.info(f"Nuevo audio: duración={new_duration:.4f}s, guardado en {new_audio_path}")
 
-        # Generar waveform
         peaks = generate_peaks_from_array(audio_resampled, sample_rate, pixels_per_second=settings.PIXELS_PER_SECOND)
         waveform_data = {
             "sample_rate": sample_rate,
@@ -336,7 +352,7 @@ class AudioService:
         saved_audio = self.audio_repo.create(new_audio_metadata)
 
         audio_buffer = io.BytesIO()
-        sf.write(audio_buffer, audio_resampled, sample_rate, format='WAV', subtype='PCM_16')
+        sf.write(audio_buffer, audio_resampled, sample_rate, format='wav')
         audio_bytes = audio_buffer.getvalue()
 
         return {
@@ -360,13 +376,11 @@ class AudioService:
         if size > 100:
             logger.warning(f"Tamaño de página {size} excede el límite, limitando a 100")
             size = 100
-
         if page < 1:
             logger.warning(f"Página {page} inválida, usando página 1")
             page = 1
 
         logger.info(f"Obteniendo audios paginados - Página: {page}, Tamaño: {size}")
-
         result = self.audio_repo.get_audios_paginated(page=page, size=size, actives=actives)
 
         if request and result.get("items"):
@@ -381,13 +395,10 @@ class AudioService:
 
     def soft_delete_audio(self, audio_id: str) -> dict:
         audio = self.audio_repo.get_by_id(audio_id)
-
         if not audio:
             raise ValueError(f"Audio {audio_id} no encontrado o se encuentra desactivado")
-
         self.audio_repo.soft_delete(audio_id)
         logger.info(f"Audio {audio_id} desactivado (soft delete)")
-
         return {
             "audio_id": audio_id,
             "message": "Audio desactivado correctamente",
@@ -397,13 +408,10 @@ class AudioService:
 
     def activate_audio(self, audio_id: str) -> dict:
         audio = self.audio_repo.get_by_id(audio_id, active=0)
-
         if not audio:
             raise ValueError(f"Audio {audio_id} no encontrado")
-
         self.audio_repo.activate(audio_id)
         logger.info(f"Audio {audio_id} activado")
-
         return {
             "audio_id": audio_id,
             "message": "Audio activado",
