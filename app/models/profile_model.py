@@ -7,7 +7,7 @@ from app.models.generated_audio_model import GeneratedAudio
 
 
 class Profile(SQLModel, table=True):
-    __tablename__ = "profile"
+    __tablename__ = "profiles"
     id: Optional[int] = Field(default=None, primary_key=True)
     folder_id: str = Field(unique=True, index=True)
     name: str = Field(index=True, min_length=1, max_length=50)
