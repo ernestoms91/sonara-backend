@@ -76,44 +76,43 @@ class AudioService:
 
         return paragraphs
 
-    def _normalize_duration(
+    def _enforce_max_duration(
         self,
         audio_array: np.ndarray,
         sample_rate: int,
-        target_duration: float = 60.0
+        max_duration: float = 60.0
     ) -> np.ndarray:
         """
-        Ajusta el audio a exactamente target_duration segundos usando
-        time stretching con preservación de pitch (librosa).
-        Para cambios de hasta ±20% es prácticamente transparente.
+        Si el audio supera max_duration, lo comprime con librosa preservando pitch.
+        Si es menor o igual, lo deja como está.
         """
         current_duration = len(audio_array) / sample_rate
 
-        if abs(current_duration - target_duration) < 0.01:
-            logger.info(f"Duración ya es {current_duration:.2f}s, sin ajuste necesario")
+        if current_duration <= max_duration:
+            logger.info(f"Duración {current_duration:.2f}s dentro del límite, sin ajuste")
             return audio_array.astype(np.float32)
 
-        rate = current_duration / target_duration  # >1 acelera, <1 frena
-        logger.info(f"Normalizando duración: {current_duration:.2f}s → {target_duration:.2f}s (rate={rate:.3f})")
+        rate = current_duration / max_duration  # siempre >1, acelera
+        logger.info(f"Comprimiendo audio: {current_duration:.2f}s → {max_duration:.2f}s (rate={rate:.3f})")
 
-        audio_stretched = librosa.effects.time_stretch(
+        audio_compressed = librosa.effects.time_stretch(
             audio_array.astype(np.float32),
             rate=rate
         )
 
-        # Recortar o rellenar por si librosa produce diferencia de samples
-        target_samples = int(round(target_duration * sample_rate))
-        if len(audio_stretched) > target_samples:
-            audio_stretched = audio_stretched[:target_samples]
-        elif len(audio_stretched) < target_samples:
-            audio_stretched = np.pad(audio_stretched, (0, target_samples - len(audio_stretched)))
+        # Ajustar samples exactos
+        max_samples = int(round(max_duration * sample_rate))
+        if len(audio_compressed) > max_samples:
+            audio_compressed = audio_compressed[:max_samples]
+        elif len(audio_compressed) < max_samples:
+            audio_compressed = np.pad(audio_compressed, (0, max_samples - len(audio_compressed)))
 
-        max_abs = np.max(np.abs(audio_stretched))
+        max_abs = np.max(np.abs(audio_compressed))
         if max_abs > 0:
-            audio_stretched = audio_stretched / max_abs * 0.95
+            audio_compressed = audio_compressed / max_abs * 0.95
 
-        logger.info(f"Duración final: {len(audio_stretched) / sample_rate:.2f}s")
-        return audio_stretched.astype(np.float32)
+        logger.info(f"Duración final: {len(audio_compressed) / sample_rate:.2f}s")
+        return audio_compressed.astype(np.float32)
 
     def generate_and_save(self, profile_id: int, text: str, created_by: str) -> dict:
         profile = self.profile_repo.get_by_id(profile_id)
@@ -134,8 +133,8 @@ class AudioService:
 
         audio_array, sample_rate = self.tts_service.synthesize(prompt, text, language=profile.language)
 
-        # Normalizar a 60 segundos exactos
-        audio_array = self._normalize_duration(audio_array, sample_rate, target_duration=60.0)
+        # Comprimir si supera 60 segundos
+        audio_array = self._enforce_max_duration(audio_array, sample_rate, max_duration=60.0)
         duration = len(audio_array) / sample_rate
 
         peaks = generate_peaks_from_array(audio_array, sample_rate, pixels_per_second=settings.PIXELS_PER_SECOND)
@@ -206,13 +205,6 @@ class AudioService:
         language = profile_a.language
         if profile_a.language != profile_b.language:
             logger.warning(f"Idiomas diferentes: A={profile_a.language}, B={profile_b.language}. Usando idioma de A.")
-        
-        if profile_a.model_type != profile_b.model_type:
-            raise ValueError(
-                f"No se puede generar dueto. Los perfiles usan diferentes modelos: "
-                f"A={profile_a.model_type}, B={profile_b.model_type}. "
-                f"Ambos deben usar el mismo tipo de modelo."
-            )
 
         prompt_a_path = Path(settings.OUTPUT_DIR) / "profiles" / profile_a.folder_id / f"{profile_a.name.lower()}.pt"
         prompt_b_path = Path(settings.OUTPUT_DIR) / "profiles" / profile_b.folder_id / f"{profile_b.name.lower()}.pt"
@@ -237,8 +229,8 @@ class AudioService:
             language=language
         )
 
-        # Normalizar a 60 segundos exactos
-        audio_array = self._normalize_duration(audio_array, sample_rate, target_duration=60.0)
+        # Comprimir si supera 60 segundos
+        audio_array = self._enforce_max_duration(audio_array, sample_rate, max_duration=60.0)
         duration = len(audio_array) / sample_rate
 
         audio_uuid = str(uuid.uuid4())
@@ -316,15 +308,32 @@ class AudioService:
         logger.info(f"Original: duración={current_duration:.4f}s, sample_rate={sample_rate}")
         logger.info(f"Target: duración={target_duration:.4f}s")
 
-        # Usar librosa para preservar pitch
-        audio_resampled = self._normalize_duration(audio_array, sample_rate, target_duration=target_duration)
+        rate = current_duration / target_duration
+        logger.info(f"Aplicando time stretch con rate={rate:.3f}")
+
+        audio_resampled = librosa.effects.time_stretch(
+            audio_array.astype(np.float32),
+            rate=rate
+        )
+
+        target_samples = int(round(target_duration * sample_rate))
+        if len(audio_resampled) > target_samples:
+            audio_resampled = audio_resampled[:target_samples]
+        elif len(audio_resampled) < target_samples:
+            audio_resampled = np.pad(audio_resampled, (0, target_samples - len(audio_resampled)))
+
+        max_abs = np.max(np.abs(audio_resampled))
+        if max_abs > 0:
+            audio_resampled = audio_resampled / max_abs * 0.95
+
         new_duration = len(audio_resampled) / sample_rate
+        logger.info(f"Nuevo audio: duración={new_duration:.4f}s")
 
         new_audio_uuid = str(uuid.uuid4())
         new_filename = f"{new_audio_uuid}.wav"
         new_audio_path = self.audios_base_dir / new_filename
         sf.write(new_audio_path, audio_resampled, sample_rate)
-        logger.info(f"Nuevo audio: duración={new_duration:.4f}s, guardado en {new_audio_path}")
+        logger.info(f"Guardado en {new_audio_path}")
 
         peaks = generate_peaks_from_array(audio_resampled, sample_rate, pixels_per_second=settings.PIXELS_PER_SECOND)
         waveform_data = {
