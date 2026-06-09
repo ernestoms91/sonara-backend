@@ -1,6 +1,6 @@
 # app/models/generated_audio_model.py
 
-from sqlmodel import SQLModel, Field
+from sqlmodel import SQLModel, Field, Relationship  
 from datetime import datetime
 from uuid import UUID, uuid4
 from typing import Optional
@@ -24,3 +24,5 @@ class GeneratedAudio(SQLModel, table=True):
     original_duration: Optional[float] = None  # Duración original antes de comprimir
     was_compressed: bool = Field(default=False)  # Si fue comprimido o no
     character_count: int = Field(default=0)  # Cantidad de caracteres del texto original
+    
+    owner_profile: Optional["Profile"] = Relationship(back_populates="owned_audios")
