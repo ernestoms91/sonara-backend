@@ -4,8 +4,10 @@ from app.api.deps.auth import CurrentAdmin, CurrentUser
 from app.api.deps.services import AudioServiceDep
 from app.schemas.audio import (
     GenerateAudioRequest,
+    GenerateDuetRequest,  # NUEVO: schema para dueto
     ChangeDurationRequest,
     AudioDataResponse,
+    DuetAudioDataResponse,  # NUEVO: respuesta para dueto
     DurationChangedResponse
 )
 from app.schemas.common import CommonResponse
@@ -33,7 +35,7 @@ async def generate_audio(
     """
     result = audio_service.generate_and_save(
         profile_id=profile_id,
-        text=request.text,  # ✅ CORREGIDO: usar request.text en lugar de text
+        text=request.text,
         created_by=current_user.full_name
     )
 
@@ -46,7 +48,54 @@ async def generate_audio(
 
     return CommonResponse.success(
         message="Audio generated successfully",
-        data=response_data.model_dump(mode="json")  # mode="json" convierte datetime a isoformat
+        data=response_data.model_dump(mode="json")
+    )
+
+
+@router.post(
+    "/generate-duet/{profile_a_id}/{profile_b_id}",
+    response_model=CommonResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generar audio con dos voces alternadas usando marcadores [P1], [P2], etc.",
+)
+async def generate_duet_audio(
+    current_user: CurrentUser,
+    audio_service: AudioServiceDep,
+    request: GenerateDuetRequest,
+    profile_a_id: int = Path(..., gt=0, description="ID del perfil A (voz para párrafos impares)"),
+    profile_b_id: int = Path(..., gt=0, description="ID del perfil B (voz para párrafos pares)"),
+) -> CommonResponse:
+    """
+    Genera un audio usando dos voces clonadas alternadas por párrafo.
+    
+    El texto debe contener marcadores [P1], [P2], [P3], etc.
+    
+    Reglas de asignación:
+    - Párrafos impares ([P1], [P3], [P5]...) → Voz del perfil A
+    - Párrafos pares ([P2], [P4], [P6]...) → Voz del perfil B
+    
+    Ejemplo:
+    "[P1] Hola soy la voz A. [P2] Y yo soy la voz B. [P3] Vuelve la voz A. [P4] Finaliza la voz B."
+    """
+    result = audio_service.generate_duet_and_save(
+        profile_a_id=profile_a_id,
+        profile_b_id=profile_b_id,
+        text_with_markers=request.text,
+        created_by=current_user.full_name
+    )
+
+    response_data = DuetAudioDataResponse(
+        audio_id=result["audio_id"],
+        duration=result["duration"],
+        filename=result["filename"],
+        created_at=result.get("created_at"),
+        profile_a=result["profile_a"],
+        profile_b=result["profile_b"]
+    )
+
+    return CommonResponse.success(
+        message="Duet audio generated successfully",
+        data=response_data.model_dump(mode="json")
     )
 
 
@@ -126,7 +175,7 @@ async def get_audios_paginated(
     summary="Obtener lista paginada de audios inactivos",
     description="Obtiene todos los audios inactivos",
 )
-async def get_inactive_audios_paginated(  # ✅ Renombrada para evitar duplicación
+async def get_inactive_audios_paginated(
     current_admin: CurrentAdmin,
     audio_service: AudioServiceDep,
     page: int = Query(1, ge=1, description="Número de página (empieza en 1)"),
