@@ -26,3 +26,8 @@ class GeneratedAudio(SQLModel, table=True):
     character_count: int = Field(default=0)  # Cantidad de caracteres del texto original
     
     owner_profile: Optional["Profile"] = Relationship(back_populates="owned_audios")
+    
+    boletines: List["Boletin"] = Relationship(
+        back_populates="audios",
+        link_model="BoletinAudioLink"
+    )
