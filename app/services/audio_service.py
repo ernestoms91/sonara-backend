@@ -157,8 +157,6 @@ class AudioService:
 
     # ─── Métodos públicos ─────────────────────────────────────────────────────
 
-# app/services/audio_service.py - Métodos actualizados
-
     def generate_and_save(self, profile_id: int, text: str, created_by: str) -> dict:
         profile = self.profile_repo.get_by_id(profile_id)
         if not profile:
@@ -171,7 +169,8 @@ class AudioService:
             raise FileNotFoundError(f"Prompt no encontrado: {prompt_path}")
 
         prompt = self.tts_service.load_prompt(str(prompt_path))
-        audio_array, sample_rate = self.tts_service.synthesize(prompt, text, language=profile.language)
+        text_clean = re.sub(r'\[P\d+\]\s*', '', text).strip()
+        audio_array, sample_rate = self.tts_service.synthesize(prompt, text_clean, language=profile.language)
 
         duration = len(audio_array) / sample_rate
 
@@ -188,11 +187,9 @@ class AudioService:
             waveform=audio_uuid,
             created_by=created_by,
             character_count=len(text)
-            # created_at se setea automáticamente
-            # active=True por defecto
         ))
 
-        return {
+        result = {
             "id": saved_audio.id,
             "audio_id": saved_audio.audio_id,
             "audio_bytes": self._to_bytes(audio_array, sample_rate),
@@ -202,6 +199,12 @@ class AudioService:
             "created_at": saved_audio.created_at,
             "waveform": waveform_data
         }
+
+        # Limpiar memoria
+        self.tts_service.empty_cache()
+        del audio_array
+
+        return result
 
     def generate_duet_and_save(
         self,
@@ -253,7 +256,7 @@ class AudioService:
         combined_text = f"[Dueto: {profile_a.name} / {profile_b.name}]\n\n"
         for i, p in enumerate(paragraphs):
             speaker = profile_a.name if (i % 2 == 0) else profile_b.name
-            combined_text += f"P{i+1} ({speaker}): {p}\n\n"
+            combined_text += f"[P{i+1}] {p}\n\n"
 
         audio_uuid = str(uuid.uuid4())
         filename = self._save_audio_file(audio_array, sample_rate, audio_uuid)
@@ -270,7 +273,7 @@ class AudioService:
             character_count=character_count
         ))
 
-        return {
+        result = {
             "id": saved_audio.id,
             "audio_id": saved_audio.audio_id,
             "audio_bytes": self._to_bytes(audio_array, sample_rate),
@@ -282,6 +285,12 @@ class AudioService:
             "profile_a": profile_a.name,
             "profile_b": profile_b.name
         }
+
+        # Limpiar memoria
+        self.tts_service.empty_cache()
+        del audio_array
+
+        return result
 
     def change_audio_duration(self, audio_id: str, target_duration: float) -> dict:
         """Cambia la duración de un audio existente usando rubberband."""
@@ -321,7 +330,7 @@ class AudioService:
             character_count=audio_info.get("character_count", 0)
         ))
 
-        return {
+        result = {
             "id": saved_audio.id,
             "audio_id": saved_audio.audio_id,
             "audio_bytes": self._to_bytes(audio_resampled, sample_rate),
@@ -332,6 +341,13 @@ class AudioService:
             "created_at": saved_audio.created_at,
             "waveform": waveform_data
         }
+
+        # Limpiar memoria
+        self.tts_service.empty_cache()
+        del audio_array
+        del audio_resampled
+
+        return result
     
     def get_audios_paginated(
         self,
@@ -385,14 +401,13 @@ class AudioService:
             "profile_id": audio["profile_id"],
             "profile_name": audio["profile_name"]
         }
-        
 
     def generate_boletin_audios(
-    self,
-    boletin_data: dict,
-    profile_a_id: int,
-    profile_b_id: int,
-    created_by: str
+        self,
+        boletin_data: dict,
+        profile_a_id: int,
+        profile_b_id: int,
+        created_by: str
     ) -> dict:
         """
         Genera audios para un boletín completo (TODO O NADA).
@@ -430,16 +445,12 @@ class AudioService:
                 
                 if es_parrafo_unico:
                     # Alternar voz para párrafos únicos
-                    # Si es el primer párrafo único o no hay último, usar A
                     if ultima_voz_unica is None:
                         voz_a_usar = "A"
                     else:
-                        # Alternar: si el último fue A, ahora B; si fue B, ahora A
                         voz_a_usar = "B" if ultima_voz_unica == "A" else "A"
                     
-                    # Actualizar la última voz usada
                     ultima_voz_unica = voz_a_usar
-                    
                     profile_id = profile_a_id if voz_a_usar == "A" else profile_b_id
                     
                     logger.info(f"Minuto {num_minuto} es párrafo único ({num_parrafos} párrafo), usando voz {voz_a_usar}")
@@ -461,8 +472,6 @@ class AudioService:
                     )
                     result["speaker"] = "dueto A/B"
                     result["tipo"] = "dueto"
-                    # Resetear la alternancia cuando hay dueto (opcional)
-                    # ultima_voz_unica = None  # Descomentar si quieres reiniciar después de dueto
                 
                 resultados.append({
                     "minuto": num_minuto,
@@ -478,24 +487,31 @@ class AudioService:
                 
                 audios_generados.append(result["audio_id"])
                 
+                # Limpiar memoria después de cada minuto
+                self.tts_service.empty_cache()
+                
                 logger.info(f"Minuto {num_minuto} completado en {time.time() - minuto_start:.2f}s")
             
-            total_duration = time.time() - start_time
-            
-            # Estadísticas de tipos de audio generados
-            duetos = sum(1 for r in resultados if r["tipo"] == "dueto")
-            unicos = sum(1 for r in resultados if r["tipo"] == "unico")
-            voz_a_unicos = sum(1 for r in resultados if r.get("speaker") == "A (único)")
-            voz_b_unicos = sum(1 for r in resultados if r.get("speaker") == "B (único)")
-            
-            logger.info(f"BOLETÍN COMPLETADO: {duetos} duetos, {unicos} únicos (A:{voz_a_unicos}, B:{voz_b_unicos}) en {total_duration:.2f}s")
-            
+                total_duration = time.time() - start_time
+                total_minutes = total_duration / 60
+
+                #  CALCULAR ESTADÍSTICAS ANTES DE USARLAS 
+                duetos = sum(1 for r in resultados if r["tipo"] == "dueto")
+                unicos = sum(1 for r in resultados if r["tipo"] == "unico")
+                voz_a_unicos = sum(1 for r in resultados if r.get("speaker") == "A (único)")
+                voz_b_unicos = sum(1 for r in resultados if r.get("speaker") == "B (único)")
+
+                # Ahora sí, usar las variables
+                logger.info(f"BOLETÍN COMPLETADO: {duetos} duetos, {unicos} únicos (A:{voz_a_unicos}, B:{voz_b_unicos}) en {total_minutes:.2f} minutos")
+
             return {
                 "total_minutos": cantidad_minutos,
                 "generados": len(resultados),
                 "errores": 0,
                 "tiempo_total_segundos": round(total_duration, 2),
+                "tiempo_total_minutos": round(total_minutes, 2),
                 "tiempo_promedio_por_minuto_segundos": round(total_duration / len(resultados), 2),
+                "tiempo_promedio_por_minuto_minutos": round(total_minutes / len(resultados), 2),
                 "estadisticas": {
                     "duetos": duetos,
                     "unicos": unicos,

@@ -38,11 +38,14 @@ class TTSService:
         sentences = re.split(r'(?<=[.!?])\s+', text.strip())
         return [s.strip() for s in sentences if len(s.strip()) > 3]
 
-    def _empty_cache(self):
+    def empty_cache(self):
         """Libera memoria GPU si está disponible"""
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-
+            torch.cuda.synchronize()
+            import gc
+            gc.collect()
+            
     def synthesize(self, prompt: VoiceClonePromptItem, text: str, language: str = "Auto") -> tuple:
         """Sintetiza un texto completo con una sola voz"""
         sentences = self._split_sentences(text)
@@ -58,7 +61,7 @@ class TTSService:
         logger.info(f"Sintetizando (single): '{text[:80]}...'" if len(text) > 80 else f"Sintetizando: '{text}'")
         device = settings.DEVICE.lower()
 
-        self._empty_cache()
+        self.empty_cache()
         t2 = time.time()
 
         if device == "cuda":
@@ -78,7 +81,7 @@ class TTSService:
                     max_new_tokens=min(len(text) * 2, 1000),
                 )
 
-        self._empty_cache()
+        self.empty_cache()
         logger.info(f"Generación modelo: {time.time() - t2:.2f}s")
 
         audio = wavs[0] if isinstance(wavs, list) else wavs
@@ -93,45 +96,87 @@ class TTSService:
         prompt: VoiceClonePromptItem,
         sentences: list[str],
         language: str,
-        return_raw: bool = False
+        return_raw: bool = False,
+        max_batch_size: int = 6
     ) -> tuple:
         """
         Sintetiza múltiples oraciones en batch.
-
-        Args:
-            prompt: Prompt de voz clonada
-            sentences: Lista de oraciones
-            language: Idioma
-            return_raw: Si True devuelve lista de audios sin concatenar
-
-        Returns:
-            Si return_raw=False: (audio_concatenado, sample_rate)
-            Si return_raw=True: (lista_de_audios, sample_rate)
+        Si el batch es muy grande (> max_batch_size), lo divide en sub-batches.
         """
+        # Si el batch es grande, dividirlo en sub-batches
+        if len(sentences) > max_batch_size:
+            logger.info(f"Batch grande ({len(sentences)} oraciones) dividido en sub-batches de {max_batch_size}")
+            
+            all_audios = []
+            sample_rate = None
+            
+            for i in range(0, len(sentences), max_batch_size):
+                sub_batch = sentences[i:i + max_batch_size]
+                logger.info(f"Procesando sub-batch {i//max_batch_size + 1}/{(len(sentences)-1)//max_batch_size + 1} ({len(sub_batch)} oraciones)")
+                
+                audios, sr = self._synthesize_batch_internal(prompt, sub_batch, language, return_raw=True)
+                sample_rate = sr
+                all_audios.extend(audios)
+                
+                # Limpiar memoria después de cada sub-batch
+                self.empty_cache()
+            
+            if return_raw:
+                logger.info(f"Devolviendo {len(all_audios)} audios individuales de sub-batches")
+                return all_audios, sample_rate
+            
+            # Concatenar todos los audios
+            silence = np.zeros(int(sample_rate * 0.25))
+            chunks = []
+            for i, audio in enumerate(all_audios):
+                chunks.append(audio)
+                if i < len(all_audios) - 1:
+                    chunks.append(silence)
+            
+            audio_final = np.concatenate(chunks)
+            logger.info(f"Sintetización batch completada (concatenado) - sample_rate: {sample_rate}")
+            return audio_final, sample_rate
+        
+        # Batch pequeño, procesar directamente
+        return self._synthesize_batch_internal(prompt, sentences, language, return_raw)
+
+    def _synthesize_batch_internal(
+        self,
+        prompt: VoiceClonePromptItem,
+        sentences: list[str],
+        language: str,
+        return_raw: bool = False
+    ) -> tuple:
+        """Método interno para sintetizar un batch de oraciones (sin división)."""
         logger.info(f"Sintetizando batch de {len(sentences)} oraciones")
         device = settings.DEVICE.lower()
 
-        self._empty_cache()
+        self.empty_cache()
         t2 = time.time()
 
-        if device == "cuda":
-            with torch.no_grad(), torch.amp.autocast("cuda", dtype=torch.float16):
-                wavs, sample_rate = self.model.generate_voice_clone(
-                    text=sentences,
-                    language=[language] * len(sentences),
-                    voice_clone_prompt=prompt,
-                    max_new_tokens=500,
-                )
-        else:
-            with torch.no_grad():
-                wavs, sample_rate = self.model.generate_voice_clone(
-                    text=sentences,
-                    language=[language] * len(sentences),
-                    voice_clone_prompt=prompt,
-                    max_new_tokens=500,
-                )
+        try:
+            if device == "cuda":
+                with torch.no_grad(), torch.amp.autocast("cuda", dtype=torch.float16):
+                    wavs, sample_rate = self.model.generate_voice_clone(
+                        text=sentences,
+                        language=[language] * len(sentences),
+                        voice_clone_prompt=prompt,
+                        max_new_tokens=500,
+                    )
+            else:
+                with torch.no_grad():
+                    wavs, sample_rate = self.model.generate_voice_clone(
+                        text=sentences,
+                        language=[language] * len(sentences),
+                        voice_clone_prompt=prompt,
+                        max_new_tokens=500,
+                    )
+        except torch.cuda.OutOfMemoryError as e:
+            logger.error(f"OOM en batch de {len(sentences)} oraciones")
+            self.empty_cache()
+            raise e
 
-        self._empty_cache()
+        self.empty_cache()
         logger.info(f"Generación batch modelo: {time.time() - t2:.2f}s")
 
         audios = []
@@ -140,6 +185,10 @@ class TTSService:
                 audios.append(wav.cpu().numpy())
             else:
                 audios.append(wav)
+
+        # Liberar tensores grandes
+        del wavs
+        self.empty_cache()
 
         if return_raw:
             logger.info(f"Devolviendo {len(audios)} audios individuales")
@@ -163,20 +212,7 @@ class TTSService:
         paragraphs: list[dict],
         language: str = "Auto"
     ) -> tuple:
-        """
-        Genera audio con dos voces alternadas por párrafo.
-
-        Args:
-            prompt_a: Prompt del locutor A
-            prompt_b: Prompt del locutor B
-            paragraphs: Lista de dicts con formato:
-                       [{"speaker": "A", "text": "texto p1"},
-                        {"speaker": "B", "text": "texto p2"}, ...]
-            language: Idioma para la generación
-
-        Returns:
-            (audio_concatenado, sample_rate)
-        """
+        """Genera audio con dos voces alternadas por párrafo."""
         logger.info(f"Iniciando síntesis duet con {len(paragraphs)} párrafos")
 
         # Dividir cada párrafo en oraciones
@@ -213,7 +249,7 @@ class TTSService:
                 prompt_a, sentences_a, language, return_raw=True
             )
 
-        self._empty_cache()
+        self.empty_cache()
 
         if sentences_b:
             logger.info(f"Generando {len(sentences_b)} oraciones para locutor B")
@@ -221,7 +257,7 @@ class TTSService:
                 prompt_b, sentences_b, language, return_raw=True
             )
 
-        self._empty_cache()
+        self.empty_cache()
 
         # Reconstruir estructura por párrafo
         wavs_by_paragraph_a = []
@@ -240,8 +276,8 @@ class TTSService:
         final_chunks = []
         idx_a = 0
         idx_b = 0
-        silence_short = np.zeros(int(sample_rate * 0.25))  # entre oraciones
-        silence_long = np.zeros(int(sample_rate * 0.5))    # entre locutores
+        silence_short = np.zeros(int(sample_rate * 0.25))
+        silence_long = np.zeros(int(sample_rate * 0.5))
 
         for p_idx, p_data in enumerate(paragraphs_data):
             if p_data["speaker"] == "A":
@@ -255,19 +291,21 @@ class TTSService:
                     final_chunks.append(silence_short)
                 idx_b += 1
 
-            # Silencio largo entre cambios de locutor
             if p_idx < len(paragraphs_data) - 1:
                 next_speaker = paragraphs_data[p_idx + 1]["speaker"]
                 if next_speaker != p_data["speaker"]:
                     final_chunks.append(silence_long)
 
-        # Quitar último silencio corto si quedó al final
         if final_chunks and len(final_chunks[-1]) == len(silence_short):
             final_chunks.pop()
 
         logger.info(f"Concatenando {len(final_chunks)} segmentos de audio")
         audio_final = np.concatenate(final_chunks)
         duration = len(audio_final) / sample_rate
+
+        # Limpiar arrays grandes
+        del audios_a, audios_b, wavs_by_paragraph_a, wavs_by_paragraph_b, final_chunks
+        self.empty_cache()
 
         logger.info(f"Síntesis duet completada - duración: {duration:.2f}s, sample_rate: {sample_rate}")
         return audio_final, sample_rate

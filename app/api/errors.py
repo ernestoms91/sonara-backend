@@ -1,5 +1,6 @@
 # app/api/errors.py
 from typing import List, Dict, Any, Optional
+import torch 
 from fastapi import Request, HTTPException, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -187,6 +188,31 @@ def general_exception_handler(request: Request, exc: Exception):
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content=response.model_dump(mode='json')
     )
+    
+def cuda_out_of_memory_handler(request: Request, exc: torch.cuda.OutOfMemoryError):
+    """Maneja errores de memoria GPU."""
+    logger.error(f"CUDA Out of Memory | {request.method} {request.url.path} | {str(exc)}")
+    
+    # Limpiar memoria automáticamente
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        import gc
+        gc.collect()
+    
+    response = CommonResponse.fail(
+        message="La GPU no tiene suficiente memoria. Intente con un texto más corto.",
+        data={
+            "path": request.url.path,
+            "method": request.method,
+            "error_type": "GPU_MEMORY_ERROR"
+        }
+    )
+    
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=response.model_dump(mode='json')
+    )
 
 
 # Registrar todos los handlers en la app
@@ -195,5 +221,6 @@ def register_exception_handlers(app):
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(ValueError, value_error_handler)
+    app.add_exception_handler(torch.cuda.OutOfMemoryError, cuda_out_of_memory_handler)
     app.add_exception_handler(Exception, general_exception_handler)
     logger.info("Exception handlers registrados correctamente")
