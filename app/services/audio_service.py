@@ -388,11 +388,11 @@ class AudioService:
         
 
     def generate_boletin_audios(
-        self,
-        boletin_data: dict,
-        profile_a_id: int,
-        profile_b_id: int,
-        created_by: str
+    self,
+    boletin_data: dict,
+    profile_a_id: int,
+    profile_b_id: int,
+    created_by: str
     ) -> dict:
         """
         Genera audios para un boletín completo (TODO O NADA).
@@ -413,20 +413,56 @@ class AudioService:
         logger.info(f"Iniciando boletín {sigla} - {fecha} - {cantidad_minutos} minutos (TODO O NADA)")
         
         resultados = []
-        audios_generados = []  # Para poder limpiar si hay error
+        audios_generados = []
+        
+        # Variable para recordar la última voz usada en párrafo único
+        ultima_voz_unica = None  # "A" o "B"
         
         try:
-            for num_minuto, texto in minutos.items():
+            for i, (num_minuto, texto) in enumerate(minutos.items()):
                 minuto_start = time.time()
                 
                 logger.info(f"Generando minuto {num_minuto}...")
                 
-                result = self.generate_duet_and_save(
-                    profile_a_id=profile_a_id,
-                    profile_b_id=profile_b_id,
-                    text_with_markers=texto,
-                    created_by=created_by
-                )
+                # Detectar cuántos párrafos tiene este minuto
+                num_parrafos = len(re.findall(r'\[P\d+\]', texto))
+                es_parrafo_unico = num_parrafos == 1
+                
+                if es_parrafo_unico:
+                    # Alternar voz para párrafos únicos
+                    # Si es el primer párrafo único o no hay último, usar A
+                    if ultima_voz_unica is None:
+                        voz_a_usar = "A"
+                    else:
+                        # Alternar: si el último fue A, ahora B; si fue B, ahora A
+                        voz_a_usar = "B" if ultima_voz_unica == "A" else "A"
+                    
+                    # Actualizar la última voz usada
+                    ultima_voz_unica = voz_a_usar
+                    
+                    profile_id = profile_a_id if voz_a_usar == "A" else profile_b_id
+                    
+                    logger.info(f"Minuto {num_minuto} es párrafo único ({num_parrafos} párrafo), usando voz {voz_a_usar}")
+                    
+                    result = self.generate_and_save(
+                        profile_id=profile_id,
+                        text=texto,
+                        created_by=created_by
+                    )
+                    result["speaker"] = f"{voz_a_usar} (único)"
+                    result["tipo"] = "unico"
+                else:
+                    # Es dueto normal (múltiples párrafos)
+                    result = self.generate_duet_and_save(
+                        profile_a_id=profile_a_id,
+                        profile_b_id=profile_b_id,
+                        text_with_markers=texto,
+                        created_by=created_by
+                    )
+                    result["speaker"] = "dueto A/B"
+                    result["tipo"] = "dueto"
+                    # Resetear la alternancia cuando hay dueto (opcional)
+                    # ultima_voz_unica = None  # Descomentar si quieres reiniciar después de dueto
                 
                 resultados.append({
                     "minuto": num_minuto,
@@ -435,7 +471,9 @@ class AudioService:
                     "filename": result["filename"],
                     "created_at": result["created_at"],
                     "character_count": result["character_count"],
-                    "tiempo_segundos": round(time.time() - minuto_start, 2)
+                    "tiempo_segundos": round(time.time() - minuto_start, 2),
+                    "speaker": result["speaker"],
+                    "tipo": result["tipo"]
                 })
                 
                 audios_generados.append(result["audio_id"])
@@ -444,7 +482,13 @@ class AudioService:
             
             total_duration = time.time() - start_time
             
-            logger.info(f"BOLETÍN COMPLETADO EXITOSAMENTE: {len(resultados)}/{cantidad_minutos} audios en {total_duration:.2f}s")
+            # Estadísticas de tipos de audio generados
+            duetos = sum(1 for r in resultados if r["tipo"] == "dueto")
+            unicos = sum(1 for r in resultados if r["tipo"] == "unico")
+            voz_a_unicos = sum(1 for r in resultados if r.get("speaker") == "A (único)")
+            voz_b_unicos = sum(1 for r in resultados if r.get("speaker") == "B (único)")
+            
+            logger.info(f"BOLETÍN COMPLETADO: {duetos} duetos, {unicos} únicos (A:{voz_a_unicos}, B:{voz_b_unicos}) en {total_duration:.2f}s")
             
             return {
                 "total_minutos": cantidad_minutos,
@@ -452,33 +496,32 @@ class AudioService:
                 "errores": 0,
                 "tiempo_total_segundos": round(total_duration, 2),
                 "tiempo_promedio_por_minuto_segundos": round(total_duration / len(resultados), 2),
+                "estadisticas": {
+                    "duetos": duetos,
+                    "unicos": unicos,
+                    "voz_a_unicos": voz_a_unicos,
+                    "voz_b_unicos": voz_b_unicos
+                },
                 "audios": resultados
             }
             
         except Exception as e:
-            # Algo falló: eliminar TODOS los audios generados
-            logger.error(f" BOLETÍN FALLIDO: {str(e)}")
+            logger.error(f"BOLETÍN FALLIDO: {str(e)}")
             logger.info(f"Eliminando {len(audios_generados)} audios generados...")
             
             for audio_id in audios_generados:
                 try:
-                    # Soft delete en BD
                     self.audio_repo.soft_delete(audio_id)
                     
-                    # Eliminar archivo físico de audio
                     audio_path = self.audios_base_dir / f"{audio_id}.wav"
                     if audio_path.exists():
                         audio_path.unlink()
-                        logger.debug(f"Eliminado: {audio_path}")
                     
-                    # Eliminar archivo físico de waveform
                     waveform_path = self.waveforms_base_dir / f"{audio_id}.json"
                     if waveform_path.exists():
                         waveform_path.unlink()
-                        logger.debug(f"Eliminado: {waveform_path}")
                         
                 except Exception as cleanup_error:
                     logger.error(f"No se pudo eliminar {audio_id}: {cleanup_error}")
             
-            # Re-lanzar la excepción original
             raise ValueError(f"Boletín fallido. Se eliminaron {len(audios_generados)} audios. Error original: {str(e)}")
