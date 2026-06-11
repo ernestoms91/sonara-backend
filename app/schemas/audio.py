@@ -1,7 +1,7 @@
 # app/schemas/audio.py
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 from uuid import UUID
 
 
@@ -65,20 +65,18 @@ class ChangeDurationRequest(BaseModel):
 
 
 class AudioDataResponse(BaseModel):
+    """Respuesta para un audio generado normalmente (sin compresión automática)"""
     audio_id: UUID
     duration: float
-    original_duration: Optional[float] = None
-    was_compressed: bool = False
     character_count: int = 0
     filename: str
     created_at: Optional[datetime] = None
 
 
 class DuetAudioDataResponse(BaseModel):
+    """Respuesta para un audio dueto generado"""
     audio_id: UUID
     duration: float
-    original_duration: Optional[float] = None
-    was_compressed: bool = False
     character_count: int = 0
     filename: str
     created_at: Optional[datetime] = None
@@ -87,9 +85,32 @@ class DuetAudioDataResponse(BaseModel):
 
 
 class DurationChangedResponse(BaseModel):
+    """Respuesta para un audio modificado en duración"""
     audio_id: UUID
     original_audio_id: UUID
     original_duration: float
     new_duration: float
     filename: str
     created_at: Optional[datetime] = None
+
+
+class AudioListItemResponse(BaseModel):
+    """Respuesta para items en lista paginada"""
+    id: int
+    audio_id: UUID
+    title: Optional[str] = None
+    text: Optional[str] = None
+    duration: float
+    character_count: int = 0
+    created_at: datetime
+    profile_id: int
+    profile_name: str
+    waveform: Optional[str] = None
+    waveform_url: Optional[str] = None
+    audio_url: Optional[str] = None
+    
+class AudioForBoletinRequest(BaseModel):
+    """Request para generar audios de un boletín completo (un audio por minuto)"""
+    profile_a_id: int = Field(..., description="ID del perfil A (voz para P1)")
+    profile_b_id: int = Field(..., description="ID del perfil B (voz para P2)")
+    minutos: Dict[str, str] = Field(..., description="Diccionario con los minutos: '1': '[P1]...[P2]...'")

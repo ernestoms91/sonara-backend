@@ -3,11 +3,12 @@ from fastapi import APIRouter, Request, status, Path, Query
 from app.api.deps.auth import CurrentAdmin, CurrentUser
 from app.api.deps.services import AudioServiceDep
 from app.schemas.audio import (
+    AudioForBoletinRequest,
     GenerateAudioRequest,
-    GenerateDuetRequest,  # NUEVO: schema para dueto
+    GenerateDuetRequest,
     ChangeDurationRequest,
     AudioDataResponse,
-    DuetAudioDataResponse,  # NUEVO: respuesta para dueto
+    DuetAudioDataResponse,
     DurationChangedResponse
 )
 from app.schemas.common import CommonResponse
@@ -42,8 +43,6 @@ async def generate_audio(
     response_data = AudioDataResponse(
         audio_id=result["audio_id"],
         duration=result["duration"],
-        original_duration=result.get("original_duration"),
-        was_compressed=result.get("was_compressed", False),
         character_count=result.get("character_count", 0),
         filename=result["filename"],
         created_at=result.get("created_at")
@@ -65,20 +64,19 @@ async def generate_duet_audio(
     current_user: CurrentUser,
     audio_service: AudioServiceDep,
     request: GenerateDuetRequest,
-    profile_a_id: int = Path(..., gt=0, description="ID del perfil A (voz para párrafos impares)"),
-    profile_b_id: int = Path(..., gt=0, description="ID del perfil B (voz para párrafos pares)"),
+    profile_a_id: int = Path(..., gt=0,
+                             description="ID del perfil A (voz para párrafos impares)"),
+    profile_b_id: int = Path(..., gt=0,
+                             description="ID del perfil B (voz para párrafos pares)"),
 ) -> CommonResponse:
     """
     Genera un audio usando dos voces clonadas alternadas por párrafo.
-    
+
     El texto debe contener marcadores [P1], [P2], [P3], etc.
-    
+
     Reglas de asignación:
     - Párrafos impares ([P1], [P3], [P5]...) → Voz del perfil A
     - Párrafos pares ([P2], [P4], [P6]...) → Voz del perfil B
-    
-    Ejemplo:
-    "[P1] Hola soy la voz A. [P2] Y yo soy la voz B. [P3] Vuelve la voz A. [P4] Finaliza la voz B."
     """
     result = audio_service.generate_duet_and_save(
         profile_a_id=profile_a_id,
@@ -90,8 +88,6 @@ async def generate_duet_audio(
     response_data = DuetAudioDataResponse(
         audio_id=result["audio_id"],
         duration=result["duration"],
-        original_duration=result.get("original_duration"),
-        was_compressed=result.get("was_compressed", False),
         character_count=result.get("character_count", 0),
         filename=result["filename"],
         created_at=result.get("created_at"),
@@ -115,7 +111,7 @@ async def change_audio_duration(
     audio_service: AudioServiceDep,
     request: ChangeDurationRequest,
     audio_id: str = Path(..., description="UUID del audio original"),
-    
+
 ) -> CommonResponse:
     """
     Cambia la duración de un audio manteniendo el tono.
@@ -151,17 +147,16 @@ async def get_audios_paginated(
     current_user: CurrentUser,
     audio_service: AudioServiceDep,
     page: int = Query(1, ge=1, description="Número de página (empieza en 1)"),
-    size: int = Query(50, ge=1, le=100, description="Cantidad de items por página (máx 100)"),
+    size: int = Query(50, ge=1, le=100,
+                      description="Cantidad de items por página (máx 100)"),
 ) -> CommonResponse:
     """
     Obtiene todos los audios paginados con nombre del perfil.
-
-    - **page**: Número de página (default: 1)
-    - **size**: Items por página (default: 50, máx: 100)
     """
     logger.info(f"GET /audio/all - page={page}, size={size}")
 
-    result = audio_service.get_audios_paginated(page=page, size=size, request=request)
+    result = audio_service.get_audios_paginated(
+        page=page, size=size, request=request)
 
     return CommonResponse.success(
         message="Audios retrieved successfully",
@@ -185,13 +180,11 @@ async def get_inactive_audios_paginated(
     current_admin: CurrentAdmin,
     audio_service: AudioServiceDep,
     page: int = Query(1, ge=1, description="Número de página (empieza en 1)"),
-    size: int = Query(50, ge=1, le=100, description="Cantidad de items por página (máx 100)"),
+    size: int = Query(50, ge=1, le=100,
+                      description="Cantidad de items por página (máx 100)"),
 ) -> CommonResponse:
     """
     Obtiene todos los audios inactivos paginados con nombre del perfil.
-
-    - **page**: Número de página (default: 1)
-    - **size**: Items por página (default: 50, máx: 100)
     """
     logger.info(f"GET /audio/inactive - page={page}, size={size}")
 
@@ -224,9 +217,7 @@ async def soft_delete_audio(
 ) -> CommonResponse:
     """
     Desactiva un audio cambiando su estado active a False.
-    El audio no se elimina físicamente ni de la base de datos ni del sistema de archivos.
     """
-
     result = audio_service.soft_delete_audio(audio_id=audio_id)
 
     logger.info(f"DELETE /audio/{audio_id} - Soft delete")
@@ -256,7 +247,6 @@ async def activate_audio(
     """
     Activa un audio cambiando su estado false a True.
     """
-
     result = audio_service.activate_audio(audio_id=audio_id)
 
     logger.info(f"ACTIVATE /audio/{audio_id}")
@@ -268,4 +258,36 @@ async def activate_audio(
             "profile_id": result["profile_id"],
             "profile_name": result["profile_name"]
         }
+    )
+
+@router.post(
+    "/generate-boletin",
+    response_model=CommonResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generar audios para un boletín completo",
+    description="Genera un audio dueto por cada minuto del boletín",
+)
+async def generate_boletin_audios(
+    current_user: CurrentUser,
+    audio_service: AudioServiceDep,
+    request: AudioForBoletinRequest,
+) -> CommonResponse:
+    """
+    Genera audios para un boletín completo.
+    
+    - Cada minuto debe tener texto con formato [P1]... [P2]...
+    - El perfil A lee los párrafos P1
+    - El perfil B lee los párrafos P2
+    - Genera un audio independiente por cada minuto
+    """
+    result = audio_service.generate_boletin_audios(
+        boletin_data=request.model_dump(),
+        profile_a_id=request.profile_a_id,
+        profile_b_id=request.profile_b_id,
+        created_by=current_user.full_name
+    )
+    
+    return CommonResponse.success(
+        message=f"Boletín procesado: {result['generados']} de {result['total_minutos']} audios generados",
+        data=result
     )

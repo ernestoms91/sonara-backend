@@ -1,11 +1,11 @@
 # app/services/audio_service.py
-import json  
+import json
 import io
 import uuid
 import pyrubberband as pyrb
 from fastapi import Request
-from scipy import signal
 import soundfile as sf
+import time
 import re
 import numpy as np
 from pathlib import Path
@@ -29,6 +29,8 @@ class AudioService:
         self.audio_repo = GeneratedAudioRepository(db)
         self.audios_base_dir = Path(settings.OUTPUT_DIR) / "generated"
         self.waveforms_base_dir = Path(settings.OUTPUT_DIR) / "waveforms"
+
+    # ─── Helpers privados ────────────────────────────────────────────────────
 
     def _extract_first_sentence(self, text: str) -> str:
         if not text:
@@ -54,61 +56,108 @@ class AudioService:
         paragraphs = []
 
         for i in range(1, total + 1):
-            if i < total:
-                pattern = rf'\[P{i}\](.*?)(?=\[P{i+1}\])'
-            else:
-                pattern = rf'\[P{i}\](.*?)$'
-
+            pattern = (
+                rf'\[P{i}\](.*?)(?=\[P{i+1}\])'
+                if i < total
+                else rf'\[P{i}\](.*?)$'
+            )
             match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
             if not match:
                 raise ValueError(f"No se encontró el marcador [P{i}]")
-
             paragraph = match.group(1).strip()
             if not paragraph:
                 raise ValueError(f"El marcador [P{i}] está vacío")
-
             paragraphs.append(paragraph)
 
         logger.info(f"Párrafos extraídos: {len(paragraphs)}")
         for idx, p in enumerate(paragraphs, 1):
-            preview = p[:50] + "..." if len(p) > 50 else p
-            logger.debug(f"P{idx}: {preview}")
+            logger.debug(f"P{idx}: {p[:50]}{'...' if len(p) > 50 else ''}")
 
         return paragraphs
 
-    def _enforce_max_duration(
+    def _normalize_volume(self, audio_array: np.ndarray) -> np.ndarray:
+        """Normaliza el volumen al 95%."""
+        max_abs = np.max(np.abs(audio_array))
+        if max_abs > 0:
+            audio_array = audio_array / max_abs * 0.95
+        return audio_array
+
+    def _apply_time_stretch(
         self,
         audio_array: np.ndarray,
         sample_rate: int,
-        max_duration: float = 60.0
+        target_duration: float,
+        normalize: bool = True
     ) -> np.ndarray:
+        """
+        Aplica time-stretch al audio para alcanzar target_duration usando rubberband.
+        
+        Args:
+            audio_array: Audio original
+            sample_rate: Tasa de muestreo
+            target_duration: Duración deseada en segundos
+            normalize: Si debe normalizar el volumen (default True)
+        """
         current_duration = len(audio_array) / sample_rate
-
-        if current_duration <= max_duration:
-            logger.info(f"Duración {current_duration:.2f}s dentro del límite, sin ajuste")
-            return audio_array.astype(np.float32)
-
-        rate = current_duration / max_duration
-        logger.info(f"Comprimiendo audio: {current_duration:.2f}s → {max_duration:.2f}s (rate={rate:.3f})")
-
-        audio_compressed = pyrb.time_stretch(
+        rate = current_duration / target_duration
+        
+        logger.info(f"Time-stretch: {current_duration:.2f}s → {target_duration:.2f}s (rate={rate:.3f})")
+        
+        audio_stretched = pyrb.time_stretch(
             audio_array.astype(np.float32),
             sample_rate,
             rate
         )
+        
+        # Ajustar a la longitud exacta
+        target_samples = int(round(target_duration * sample_rate))
+        if len(audio_stretched) > target_samples:
+            audio_stretched = audio_stretched[:target_samples]
+        elif len(audio_stretched) < target_samples:
+            audio_stretched = np.pad(audio_stretched, (0, target_samples - len(audio_stretched)))
+        
+        # Normalizar si es necesario
+        if normalize:
+            audio_stretched = self._normalize_volume(audio_stretched)
+        
+        logger.info(f"Duración final: {len(audio_stretched) / sample_rate:.2f}s")
+        return audio_stretched.astype(np.float32)
 
-        max_samples = int(round(max_duration * sample_rate))
-        if len(audio_compressed) > max_samples:
-            audio_compressed = audio_compressed[:max_samples]
-        elif len(audio_compressed) < max_samples:
-            audio_compressed = np.pad(audio_compressed, (0, max_samples - len(audio_compressed)))
+    def _save_audio_file(self, audio_array: np.ndarray, sample_rate: int, audio_uuid: str) -> str:
+        """Guarda el archivo WAV y retorna el filename."""
+        self.audios_base_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{audio_uuid}.wav"
+        sf.write(self.audios_base_dir / filename, audio_array, sample_rate)
+        logger.info(f"Audio guardado en: {self.audios_base_dir / filename}")
+        return filename
 
-        max_abs = np.max(np.abs(audio_compressed))
-        if max_abs > 0:
-            audio_compressed = audio_compressed / max_abs * 0.95
+    def _save_waveform(self, audio_array: np.ndarray, sample_rate: int, audio_uuid: str) -> dict:
+        """Genera y guarda el waveform JSON. Retorna el dict."""
+        peaks = generate_peaks_from_array(audio_array, sample_rate, pixels_per_second=settings.PIXELS_PER_SECOND)
+        waveform_data = {
+            "sample_rate": sample_rate,
+            "bits": 8,
+            "duration": float(len(audio_array) / sample_rate),
+            "channels": 1 if audio_array.ndim == 1 else 2,
+            "pixels_per_second": 20,
+            "data_overview_length": len(peaks),
+            "data": peaks,
+        }
+        waveform_path = self.waveforms_base_dir / f"{audio_uuid}.json"
+        with open(waveform_path, "w", encoding="utf-8") as f:
+            json.dump(waveform_data, f, ensure_ascii=False)
+        logger.info(f"Waveform guardado en: {waveform_path}")
+        return waveform_data
 
-        logger.info(f"Duración final: {len(audio_compressed) / sample_rate:.2f}s")
-        return audio_compressed.astype(np.float32)
+    def _to_bytes(self, audio_array: np.ndarray, sample_rate: int) -> bytes:
+        """Convierte audio array a bytes WAV."""
+        buffer = io.BytesIO()
+        sf.write(buffer, audio_array, sample_rate, format='wav')
+        return buffer.getvalue()
+
+    # ─── Métodos públicos ─────────────────────────────────────────────────────
+
+# app/services/audio_service.py - Métodos actualizados
 
     def generate_and_save(self, profile_id: int, text: str, created_by: str) -> dict:
         profile = self.profile_repo.get_by_id(profile_id)
@@ -117,50 +166,20 @@ class AudioService:
         if not profile.active:
             raise ValueError(f"Perfil {profile_id} no está activo")
 
-        audio_uuid = str(uuid.uuid4())
-
-        profile_folder = Path(settings.OUTPUT_DIR) / "profiles" / profile.folder_id
-        prompt_path = profile_folder / f"{profile.name.lower()}.pt"
-
+        prompt_path = Path(settings.OUTPUT_DIR) / "profiles" / profile.folder_id / f"{profile.name.lower()}.pt"
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt no encontrado: {prompt_path}")
 
         prompt = self.tts_service.load_prompt(str(prompt_path))
-
         audio_array, sample_rate = self.tts_service.synthesize(prompt, text, language=profile.language)
 
-        # Guardar duración original antes de comprimir
-        raw_duration = len(audio_array) / sample_rate
-
-        # Comprimir si supera 60 segundos
-        audio_array = self._enforce_max_duration(audio_array, sample_rate, max_duration=60.0)
         duration = len(audio_array) / sample_rate
-        was_compressed = raw_duration > 60.0
 
-        peaks = generate_peaks_from_array(audio_array, sample_rate, pixels_per_second=settings.PIXELS_PER_SECOND)
+        audio_uuid = str(uuid.uuid4())
+        filename = self._save_audio_file(audio_array, sample_rate, audio_uuid)
+        waveform_data = self._save_waveform(audio_array, sample_rate, audio_uuid)
 
-        waveform_data = {
-            "sample_rate": sample_rate,
-            "bits": 8,
-            "duration": float(duration),
-            "channels": 1 if audio_array.ndim == 1 else 2,
-            "pixels_per_second": 20,
-            "data_overview_length": len(peaks),
-            "data": peaks,
-        }
-
-        waveform_path = self.waveforms_base_dir / f"{audio_uuid}.json"
-        with open(waveform_path, "w", encoding="utf-8") as f:
-            json.dump(waveform_data, f, ensure_ascii=False)
-        logger.info(f"Waveform guardado en: {waveform_path}")
-
-        self.audios_base_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{audio_uuid}.wav"
-        audio_path = self.audios_base_dir / filename
-        sf.write(audio_path, audio_array, sample_rate)
-        logger.info(f"Audio guardado en: {audio_path}")
-
-        audio_metadata = GeneratedAudio(
+        saved_audio = self.audio_repo.create(GeneratedAudio(
             audio_id=audio_uuid,
             profile_id=profile_id,
             text=text,
@@ -168,24 +187,17 @@ class AudioService:
             title=self._extract_first_sentence(text),
             waveform=audio_uuid,
             created_by=created_by,
-            original_duration=raw_duration,
-            was_compressed=was_compressed,
             character_count=len(text)
-        )
-        saved_audio = self.audio_repo.create(audio_metadata)
-
-        audio_buffer = io.BytesIO()
-        sf.write(audio_buffer, audio_array, sample_rate, format='wav')
-        audio_bytes = audio_buffer.getvalue()
+            # created_at se setea automáticamente
+            # active=True por defecto
+        ))
 
         return {
             "id": saved_audio.id,
             "audio_id": saved_audio.audio_id,
-            "audio_bytes": audio_bytes,
+            "audio_bytes": self._to_bytes(audio_array, sample_rate),
             "filename": filename,
             "duration": duration,
-            "original_duration": raw_duration,
-            "was_compressed": was_compressed,
             "character_count": len(text),
             "created_at": saved_audio.created_at,
             "waveform": waveform_data
@@ -235,47 +247,19 @@ class AudioService:
             language=language
         )
 
-        # Guardar duración original antes de comprimir
-        raw_duration = len(audio_array) / sample_rate
-
-        # Comprimir si supera 60 segundos
-        audio_array = self._enforce_max_duration(audio_array, sample_rate, max_duration=60.0)
         duration = len(audio_array) / sample_rate
-        was_compressed = raw_duration > 60.0
-
-        # character_count para dueto: suma de todos los párrafos
         character_count = sum(len(p) for p in paragraphs)
-
-        audio_uuid = str(uuid.uuid4())
-        self.audios_base_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{audio_uuid}.wav"
-        audio_path = self.audios_base_dir / filename
-        sf.write(audio_path, audio_array, sample_rate)
-        logger.info(f"Audio dueto guardado en: {audio_path}")
-
-        peaks = generate_peaks_from_array(audio_array, sample_rate, pixels_per_second=settings.PIXELS_PER_SECOND)
-
-        waveform_data = {
-            "sample_rate": sample_rate,
-            "bits": 8,
-            "duration": float(duration),
-            "channels": 1 if audio_array.ndim == 1 else 2,
-            "pixels_per_second": 20,
-            "data_overview_length": len(peaks),
-            "data": peaks,
-        }
-
-        waveform_path = self.waveforms_base_dir / f"{audio_uuid}.json"
-        with open(waveform_path, "w", encoding="utf-8") as f:
-            json.dump(waveform_data, f, ensure_ascii=False)
-        logger.info(f"Waveform dueto guardado en: {waveform_path}")
 
         combined_text = f"[Dueto: {profile_a.name} / {profile_b.name}]\n\n"
         for i, p in enumerate(paragraphs):
             speaker = profile_a.name if (i % 2 == 0) else profile_b.name
             combined_text += f"P{i+1} ({speaker}): {p}\n\n"
 
-        audio_metadata = GeneratedAudio(
+        audio_uuid = str(uuid.uuid4())
+        filename = self._save_audio_file(audio_array, sample_rate, audio_uuid)
+        waveform_data = self._save_waveform(audio_array, sample_rate, audio_uuid)
+
+        saved_audio = self.audio_repo.create(GeneratedAudio(
             audio_id=audio_uuid,
             profile_id=profile_a_id,
             text=combined_text,
@@ -283,24 +267,15 @@ class AudioService:
             title=f"Dueto: {profile_a.name} & {profile_b.name} - {self._extract_first_sentence(paragraphs[0])}",
             waveform=audio_uuid,
             created_by=created_by,
-            original_duration=raw_duration,
-            was_compressed=was_compressed,
             character_count=character_count
-        )
-        saved_audio = self.audio_repo.create(audio_metadata)
-
-        audio_buffer = io.BytesIO()
-        sf.write(audio_buffer, audio_array, sample_rate, format='wav')
-        audio_bytes = audio_buffer.getvalue()
+        ))
 
         return {
             "id": saved_audio.id,
             "audio_id": saved_audio.audio_id,
-            "audio_bytes": audio_bytes,
+            "audio_bytes": self._to_bytes(audio_array, sample_rate),
             "filename": filename,
             "duration": duration,
-            "original_duration": raw_duration,
-            "was_compressed": was_compressed,
             "character_count": character_count,
             "created_at": saved_audio.created_at,
             "waveform": waveform_data,
@@ -309,6 +284,7 @@ class AudioService:
         }
 
     def change_audio_duration(self, audio_id: str, target_duration: float) -> dict:
+        """Cambia la duración de un audio existente usando rubberband."""
         audio_info = self.audio_repo.get_by_id(audio_id)
         if not audio_info:
             raise ValueError(f"Audio {audio_id} no encontrado")
@@ -324,80 +300,39 @@ class AudioService:
             logger.info("Audio convertido de estéreo a mono")
 
         current_duration = len(audio_array) / sample_rate
-        logger.info(f"Original: duración={current_duration:.4f}s, sample_rate={sample_rate}")
-        logger.info(f"Target: duración={target_duration:.4f}s")
-
-        rate = current_duration / target_duration
-        logger.info(f"Aplicando time stretch con rate={rate:.3f}")
-
-        audio_resampled = pyrb.time_stretch(
-            audio_array.astype(np.float32),
-            sample_rate,
-            rate
-        )
-
-        target_samples = int(round(target_duration * sample_rate))
-        if len(audio_resampled) > target_samples:
-            audio_resampled = audio_resampled[:target_samples]
-        elif len(audio_resampled) < target_samples:
-            audio_resampled = np.pad(audio_resampled, (0, target_samples - len(audio_resampled)))
-
-        max_abs = np.max(np.abs(audio_resampled))
-        if max_abs > 0:
-            audio_resampled = audio_resampled / max_abs * 0.95
-
+        
+        # Aplicar time-stretch usando rubberband
+        audio_resampled = self._apply_time_stretch(audio_array, sample_rate, target_duration)
         new_duration = len(audio_resampled) / sample_rate
-        logger.info(f"Nuevo audio: duración={new_duration:.4f}s")
 
         new_audio_uuid = str(uuid.uuid4())
-        new_filename = f"{new_audio_uuid}.wav"
-        new_audio_path = self.audios_base_dir / new_filename
-        sf.write(new_audio_path, audio_resampled, sample_rate)
-        logger.info(f"Guardado en {new_audio_path}")
+        filename = self._save_audio_file(audio_resampled, sample_rate, new_audio_uuid)
+        waveform_data = self._save_waveform(audio_resampled, sample_rate, new_audio_uuid)
 
-        peaks = generate_peaks_from_array(audio_resampled, sample_rate, pixels_per_second=settings.PIXELS_PER_SECOND)
-        waveform_data = {
-            "sample_rate": sample_rate,
-            "bits": 8,
-            "duration": float(new_duration),
-            "channels": 1,
-            "pixels_per_second": 20,
-            "data_overview_length": len(peaks),
-            "data": peaks,
-        }
-        waveform_path = self.waveforms_base_dir / f"{new_audio_uuid}.json"
-        with open(waveform_path, "w", encoding="utf-8") as f:
-            json.dump(waveform_data, f, ensure_ascii=False)
-
-        new_audio_metadata = GeneratedAudio(
+        # Crear nuevo audio con la duración modificada
+        saved_audio = self.audio_repo.create(GeneratedAudio(
             audio_id=new_audio_uuid,
             profile_id=audio_info["profile_id"],
             text=audio_info["text"],
             duration=new_duration,
-            title=audio_info.get("title", ""),
+            title=f"[Modificado] {audio_info.get('title', 'Audio')}",
             waveform=new_audio_uuid,
             created_by=audio_info.get("created_by", "system"),
-            original_duration=current_duration,
-            was_compressed=True,
             character_count=audio_info.get("character_count", 0)
-        )
-        saved_audio = self.audio_repo.create(new_audio_metadata)
-
-        audio_buffer = io.BytesIO()
-        sf.write(audio_buffer, audio_resampled, sample_rate, format='wav')
-        audio_bytes = audio_buffer.getvalue()
+        ))
 
         return {
             "id": saved_audio.id,
             "audio_id": saved_audio.audio_id,
-            "audio_bytes": audio_bytes,
-            "filename": new_filename,
+            "audio_bytes": self._to_bytes(audio_resampled, sample_rate),
+            "filename": filename,
             "original_audio_id": audio_id,
             "original_duration": current_duration,
             "new_duration": new_duration,
-            "created_at": saved_audio.created_at
+            "created_at": saved_audio.created_at,
+            "waveform": waveform_data
         }
-
+    
     def get_audios_paginated(
         self,
         page: int = 1,
@@ -450,3 +385,100 @@ class AudioService:
             "profile_id": audio["profile_id"],
             "profile_name": audio["profile_name"]
         }
+        
+
+    def generate_boletin_audios(
+        self,
+        boletin_data: dict,
+        profile_a_id: int,
+        profile_b_id: int,
+        created_by: str
+    ) -> dict:
+        """
+        Genera audios para un boletín completo (TODO O NADA).
+        Si algún minuto falla, se eliminan todos los audios generados.
+        """
+        start_time = time.time()
+        
+        minutos = boletin_data.get("minutos", {})
+        sigla = boletin_data.get("sigla", "")
+        fecha = boletin_data.get("fecha", "")
+        hora = boletin_data.get("hora", "")
+        
+        cantidad_minutos = len(minutos)
+        
+        if cantidad_minutos != 30:
+            raise ValueError(f"Se requieren exactamente 30 minutos. Recibidos: {cantidad_minutos}")
+        
+        logger.info(f"Iniciando boletín {sigla} - {fecha} - {cantidad_minutos} minutos (TODO O NADA)")
+        
+        resultados = []
+        audios_generados = []  # Para poder limpiar si hay error
+        
+        try:
+            for num_minuto, texto in minutos.items():
+                minuto_start = time.time()
+                
+                logger.info(f"Generando minuto {num_minuto}...")
+                
+                result = self.generate_duet_and_save(
+                    profile_a_id=profile_a_id,
+                    profile_b_id=profile_b_id,
+                    text_with_markers=texto,
+                    created_by=created_by
+                )
+                
+                resultados.append({
+                    "minuto": num_minuto,
+                    "audio_id": result["audio_id"],
+                    "duration": result["duration"],
+                    "filename": result["filename"],
+                    "created_at": result["created_at"],
+                    "character_count": result["character_count"],
+                    "tiempo_segundos": round(time.time() - minuto_start, 2)
+                })
+                
+                audios_generados.append(result["audio_id"])
+                
+                logger.info(f"Minuto {num_minuto} completado en {time.time() - minuto_start:.2f}s")
+            
+            total_duration = time.time() - start_time
+            
+            logger.info(f"BOLETÍN COMPLETADO EXITOSAMENTE: {len(resultados)}/{cantidad_minutos} audios en {total_duration:.2f}s")
+            
+            return {
+                "total_minutos": cantidad_minutos,
+                "generados": len(resultados),
+                "errores": 0,
+                "tiempo_total_segundos": round(total_duration, 2),
+                "tiempo_promedio_por_minuto_segundos": round(total_duration / len(resultados), 2),
+                "audios": resultados
+            }
+            
+        except Exception as e:
+            # Algo falló: eliminar TODOS los audios generados
+            logger.error(f" BOLETÍN FALLIDO: {str(e)}")
+            logger.info(f"Eliminando {len(audios_generados)} audios generados...")
+            
+            for audio_id in audios_generados:
+                try:
+                    # Soft delete en BD
+                    self.audio_repo.soft_delete(audio_id)
+                    
+                    # Eliminar archivo físico de audio
+                    audio_path = self.audios_base_dir / f"{audio_id}.wav"
+                    if audio_path.exists():
+                        audio_path.unlink()
+                        logger.debug(f"Eliminado: {audio_path}")
+                    
+                    # Eliminar archivo físico de waveform
+                    waveform_path = self.waveforms_base_dir / f"{audio_id}.json"
+                    if waveform_path.exists():
+                        waveform_path.unlink()
+                        logger.debug(f"Eliminado: {waveform_path}")
+                        
+                except Exception as cleanup_error:
+                    logger.error(f"No se pudo eliminar {audio_id}: {cleanup_error}")
+            
+            # Re-lanzar la excepción original
+            raise ValueError(f"Boletín fallido. Se eliminaron {len(audios_generados)} audios. Error original: {str(e)}")
