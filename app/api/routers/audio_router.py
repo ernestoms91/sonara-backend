@@ -100,42 +100,6 @@ async def generate_duet_audio(
         data=response_data.model_dump(mode="json")
     )
 
-
-@router.post(
-    "/{audio_id}/change-duration",
-    response_model=CommonResponse,
-    summary="Cambiar la duración de un audio existente",
-)
-async def change_audio_duration(
-    current_user: CurrentUser,
-    audio_service: AudioServiceDep,
-    request: ChangeDurationRequest,
-    audio_id: str = Path(..., description="UUID del audio original"),
-
-) -> CommonResponse:
-    """
-    Cambia la duración de un audio manteniendo el tono.
-    """
-    result = audio_service.change_audio_duration(
-        audio_id=audio_id,
-        target_duration=request.target_duration
-    )
-
-    response_data = DurationChangedResponse(
-        audio_id=result["audio_id"],
-        original_audio_id=result["original_audio_id"],
-        original_duration=result["original_duration"],
-        new_duration=result["new_duration"],
-        filename=result["filename"],
-        created_at=result.get("created_at")
-    )
-
-    return CommonResponse.success(
-        message=f"Audio duration changed to {request.target_duration} seconds",
-        data=response_data.model_dump(mode="json")
-    )
-
-
 @router.get(
     "/all",
     response_model=CommonResponse,

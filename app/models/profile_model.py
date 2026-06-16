@@ -25,3 +25,7 @@ class Profile(SQLModel, table=True):
         back_populates="owner_profile",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
+    
+    secondary_audios: List["GeneratedAudio"] = Relationship(
+        back_populates="secondary_profile"
+    )

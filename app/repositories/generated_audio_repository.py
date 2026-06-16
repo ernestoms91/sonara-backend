@@ -1,5 +1,5 @@
 # app/repositories/generated_audio_repository.py
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, aliased  # IMPORTANTE: importar aliased
 
 from app.models.profile_model import Profile
 from sqlmodel import Session, select
@@ -24,6 +24,9 @@ class GeneratedAudioRepository:
 
     def get_by_id(self, audio_id: str, active: bool = True) -> dict | None:
         """Obtiene un audio por su ID numérico."""
+        # Creamos un alias para la tabla Profile para el segundo join
+        secondary_profile = aliased(Profile)
+        
         statement = select(
             GeneratedAudio.id,
             GeneratedAudio.audio_id,
@@ -32,15 +35,19 @@ class GeneratedAudioRepository:
             GeneratedAudio.character_count,
             GeneratedAudio.created_at,
             GeneratedAudio.profile_id,
+            GeneratedAudio.secondary_profile_id,
             GeneratedAudio.active,
             GeneratedAudio.title,
             GeneratedAudio.created_by,
             GeneratedAudio.waveform,
-            Profile.name.label("profile_name")
+            Profile.name.label("profile_name"),
+            secondary_profile.name.label("secondary_profile_name")  # Usamos el alias
         ).join(
             Profile, GeneratedAudio.profile_id == Profile.id
+        ).outerjoin(
+            secondary_profile, GeneratedAudio.secondary_profile_id == secondary_profile.id  # Usamos el alias
         ).where(
-            GeneratedAudio.id == audio_id,  # Nota: audio_id es el ID numérico
+            GeneratedAudio.id == audio_id,
             GeneratedAudio.active == active
         )
 
@@ -58,6 +65,8 @@ class GeneratedAudioRepository:
             "created_at": result.created_at,
             "profile_id": result.profile_id,
             "profile_name": result.profile_name,
+            "secondary_profile_id": result.secondary_profile_id,
+            "secondary_profile_name": result.secondary_profile_name,
             "title": result.title,
             "created_by": result.created_by,
             "waveform": result.waveform,
@@ -65,6 +74,8 @@ class GeneratedAudioRepository:
 
     def get_by_audio_id(self, audio_uuid: str, active: bool = True) -> dict | None:
         """Obtiene un audio por su UUID (audio_id)."""
+        secondary_profile = aliased(Profile)
+        
         statement = select(
             GeneratedAudio.id,
             GeneratedAudio.audio_id,
@@ -73,13 +84,17 @@ class GeneratedAudioRepository:
             GeneratedAudio.character_count,
             GeneratedAudio.created_at,
             GeneratedAudio.profile_id,
+            GeneratedAudio.secondary_profile_id,
             GeneratedAudio.active,
             GeneratedAudio.title,
             GeneratedAudio.created_by,
             GeneratedAudio.waveform,
-            Profile.name.label("profile_name")
+            Profile.name.label("profile_name"),
+            secondary_profile.name.label("secondary_profile_name")
         ).join(
             Profile, GeneratedAudio.profile_id == Profile.id
+        ).outerjoin(
+            secondary_profile, GeneratedAudio.secondary_profile_id == secondary_profile.id
         ).where(
             GeneratedAudio.audio_id == audio_uuid,
             GeneratedAudio.active == active
@@ -99,6 +114,8 @@ class GeneratedAudioRepository:
             "created_at": result.created_at,
             "profile_id": result.profile_id,
             "profile_name": result.profile_name,
+            "secondary_profile_id": result.secondary_profile_id,
+            "secondary_profile_name": result.secondary_profile_name,
             "title": result.title,
             "created_by": result.created_by,
             "waveform": result.waveform,
@@ -114,6 +131,8 @@ class GeneratedAudioRepository:
 
     def get_audios_paginated(self, page: int = 1, size: int = 50, actives: bool = True) -> dict:
         """Obtiene audios paginados."""
+        secondary_profile = aliased(Profile)
+        
         statement = select(
             GeneratedAudio.id,
             GeneratedAudio.audio_id,
@@ -123,10 +142,14 @@ class GeneratedAudioRepository:
             GeneratedAudio.character_count,
             GeneratedAudio.created_at,
             GeneratedAudio.profile_id,
+            GeneratedAudio.secondary_profile_id,
             GeneratedAudio.waveform,
-            Profile.name.label("profile_name")
+            Profile.name.label("profile_name"),
+            secondary_profile.name.label("secondary_profile_name")
         ).join(
             Profile, GeneratedAudio.profile_id == Profile.id
+        ).outerjoin(
+            secondary_profile, GeneratedAudio.secondary_profile_id == secondary_profile.id
         ).where(
             GeneratedAudio.active == actives
         ).order_by(GeneratedAudio.created_at.desc())
@@ -169,12 +192,15 @@ class GeneratedAudioRepository:
             
     def get_by_audio_id_with_relationship(self, audio_id: str):
         """
-        Obtiene un audio con la relación owner_profile cargada.
-        Retorna un objeto GeneratedAudio con el perfil accesible como .owner_profile
+        Obtiene un audio con las relaciones owner_profile y secondary_profile cargadas.
+        Retorna un objeto GeneratedAudio con los perfiles accesibles como .owner_profile y .secondary_profile
         """
         statement = (
             select(GeneratedAudio)
-            .options(joinedload(GeneratedAudio.owner_profile))
+            .options(
+                joinedload(GeneratedAudio.owner_profile),
+                joinedload(GeneratedAudio.secondary_profile)
+            )
             .where(GeneratedAudio.audio_id == audio_id, GeneratedAudio.active == True)
         )
         result = self.db.exec(statement).unique().first()

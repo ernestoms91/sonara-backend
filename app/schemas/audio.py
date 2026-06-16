@@ -105,10 +105,13 @@ class AudioListItemResponse(BaseModel):
     created_at: datetime
     profile_id: int
     profile_name: str
+    secondary_profile_id: Optional[int] = None  # ✅ NUEVO
+    secondary_profile_name: Optional[str] = None  # ✅ NUEVO
     waveform: Optional[str] = None
     waveform_url: Optional[str] = None
     audio_url: Optional[str] = None
-    
+
+
 class AudioForBoletinRequest(BaseModel):
     """Request para generar audios de un boletín completo (un audio por minuto)"""
     profile_a_id: int = Field(..., description="ID del perfil A (voz para P1)")

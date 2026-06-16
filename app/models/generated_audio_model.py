@@ -14,6 +14,11 @@ class GeneratedAudio(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     audio_id: str = Field(unique=True, index=True)
     profile_id: int = Field(foreign_key="profiles.id", index=True)
+    secondary_profile_id: Optional[int] = Field(
+        default=None, 
+        foreign_key="profiles.id", 
+        index=True
+    )
     text: str = Field(sa_type=sa.Text)
     title: Optional[str] = None
     duration: float  # Duración final del audio en segundos
@@ -24,6 +29,9 @@ class GeneratedAudio(SQLModel, table=True):
     character_count: int = Field(default=0)  # Cantidad de caracteres del texto original
     
     owner_profile: Optional["Profile"] = Relationship(back_populates="owned_audios")
+    
+    secondary_profile: Optional["Profile"] = Relationship(back_populates="secondary_audios")
+    
     
     boletines: List["Boletin"] = Relationship(
         back_populates="audios",

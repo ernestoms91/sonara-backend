@@ -253,9 +253,8 @@ class AudioService:
         duration = len(audio_array) / sample_rate
         character_count = sum(len(p) for p in paragraphs)
 
-        combined_text = f"[Dueto: {profile_a.name} / {profile_b.name}]\n\n"
+        combined_text = ""
         for i, p in enumerate(paragraphs):
-            speaker = profile_a.name if (i % 2 == 0) else profile_b.name
             combined_text += f"[P{i+1}] {p}\n\n"
 
         audio_uuid = str(uuid.uuid4())
@@ -265,9 +264,10 @@ class AudioService:
         saved_audio = self.audio_repo.create(GeneratedAudio(
             audio_id=audio_uuid,
             profile_id=profile_a_id,
+            secondary_profile_id=profile_b_id,
             text=combined_text,
             duration=duration,
-            title=f"Dueto: {profile_a.name} & {profile_b.name} - {self._extract_first_sentence(paragraphs[0])}",
+            title= self._extract_first_sentence(paragraphs[0]),
             waveform=audio_uuid,
             created_by=created_by,
             character_count=character_count
@@ -289,63 +289,6 @@ class AudioService:
         # Limpiar memoria
         self.tts_service.empty_cache()
         del audio_array
-
-        return result
-
-    def change_audio_duration(self, audio_id: str, target_duration: float) -> dict:
-        """Cambia la duración de un audio existente usando rubberband."""
-        audio_info = self.audio_repo.get_by_id(audio_id)
-        if not audio_info:
-            raise ValueError(f"Audio {audio_id} no encontrado")
-
-        original_path = self.audios_base_dir / f"{audio_id}.wav"
-        if not original_path.exists():
-            raise FileNotFoundError(f"Archivo de audio no encontrado: {original_path}")
-
-        audio_array, sample_rate = sf.read(original_path)
-
-        if audio_array.ndim == 2:
-            audio_array = np.mean(audio_array, axis=1)
-            logger.info("Audio convertido de estéreo a mono")
-
-        current_duration = len(audio_array) / sample_rate
-        
-        # Aplicar time-stretch usando rubberband
-        audio_resampled = self._apply_time_stretch(audio_array, sample_rate, target_duration)
-        new_duration = len(audio_resampled) / sample_rate
-
-        new_audio_uuid = str(uuid.uuid4())
-        filename = self._save_audio_file(audio_resampled, sample_rate, new_audio_uuid)
-        waveform_data = self._save_waveform(audio_resampled, sample_rate, new_audio_uuid)
-
-        # Crear nuevo audio con la duración modificada
-        saved_audio = self.audio_repo.create(GeneratedAudio(
-            audio_id=new_audio_uuid,
-            profile_id=audio_info["profile_id"],
-            text=audio_info["text"],
-            duration=new_duration,
-            title=f"[Modificado] {audio_info.get('title', 'Audio')}",
-            waveform=new_audio_uuid,
-            created_by=audio_info.get("created_by", "system"),
-            character_count=audio_info.get("character_count", 0)
-        ))
-
-        result = {
-            "id": saved_audio.id,
-            "audio_id": saved_audio.audio_id,
-            "audio_bytes": self._to_bytes(audio_resampled, sample_rate),
-            "filename": filename,
-            "original_audio_id": audio_id,
-            "original_duration": current_duration,
-            "new_duration": new_duration,
-            "created_at": saved_audio.created_at,
-            "waveform": waveform_data
-        }
-
-        # Limpiar memoria
-        self.tts_service.empty_cache()
-        del audio_array
-        del audio_resampled
 
         return result
     
@@ -437,7 +380,7 @@ class AudioService:
             for i, (num_minuto, texto) in enumerate(minutos.items()):
                 minuto_start = time.time()
                 
-                logger.info(f"Generando minuto {num_minuto}...")
+                logger.info(f"Generando minuto {i + 1}...")
                 
                 # Detectar cuántos párrafos tiene este minuto
                 num_parrafos = len(re.findall(r'\[P\d+\]', texto))
@@ -453,7 +396,7 @@ class AudioService:
                     ultima_voz_unica = voz_a_usar
                     profile_id = profile_a_id if voz_a_usar == "A" else profile_b_id
                     
-                    logger.info(f"Minuto {num_minuto} es párrafo único ({num_parrafos} párrafo), usando voz {voz_a_usar}")
+                    logger.info(f"Minuto {i + 1} es párrafo único ({num_parrafos} párrafo), usando voz {voz_a_usar}")
                     
                     result = self.generate_and_save(
                         profile_id=profile_id,
@@ -474,7 +417,7 @@ class AudioService:
                     result["tipo"] = "dueto"
                 
                 resultados.append({
-                    "minuto": num_minuto,
+                    "minuto": i + 1,
                     "audio_id": result["audio_id"],
                     "duration": result["duration"],
                     "filename": result["filename"],
