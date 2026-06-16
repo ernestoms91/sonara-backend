@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from io import BytesIO
 import os
+import numpy as np
+import soundfile as sf
+import pyrubberband as pyrb
 from app.core.logging import get_logger
 
 
@@ -11,7 +14,7 @@ logger = get_logger(__name__)
 
 
 class AudioMerger:
-    """Helper para unir archivos de audio usando pydub."""
+    """Helper para unir archivos de audio usando pydub y Rubberband para estiramiento de tiempo."""
 
     @staticmethod
     def merge_audio_files(
@@ -19,8 +22,8 @@ class AudioMerger:
         output_path: str,
         output_format: str = "mp3",
         crossfade_ms: int = 0,
-        silence_thresh: int = -40,   # umbral de volumen considerado silencio en dB
-        silence_len: int = 100,      # mínimo ms de silencio a considerar
+        silence_thresh: int = -40,
+        silence_len: int = 100,
         tags: Optional[Dict[str, str]] = None,
         normalize_segments: bool = True,
         target_dBFS: float = -20.0,
@@ -49,10 +52,8 @@ class AudioMerger:
         if not audio_paths:
             raise ValueError("No se proporcionaron archivos de audio")
 
-        # Crear directorio de salida si no existe
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # Cargar el primer audio
         combined = AudioSegment.from_file(audio_paths[0])
         combined = combined.strip_silence(
             silence_len=silence_len,
@@ -66,7 +67,6 @@ class AudioMerger:
             f"(duración: {combined.duration_seconds:.2f}s)"
         )
 
-        # Unir el resto de los audios
         for path in audio_paths[1:]:
             next_audio = AudioSegment.from_file(path)
             next_audio = next_audio.strip_silence(
@@ -86,7 +86,6 @@ class AudioMerger:
                 f"  + {path} (duración: {next_audio.duration_seconds:.2f}s)"
             )
 
-        # Exportar el audio unido
         export_format = output_format
         export_codec = None
         if output_format == "m4a":
@@ -237,7 +236,7 @@ class AudioMerger:
             raise FileNotFoundError(f"No se encuentra: {audio_path}")
         
         audio = AudioSegment.from_file(audio_path)
-        duration = round(audio.duration_seconds)  # Redondea al entero más cercano
+        duration = round(audio.duration_seconds)
         
         logger.info(f"Duración del audio {audio_path}: {duration}s")
         
@@ -262,42 +261,95 @@ class AudioMerger:
         input_path: str,
         output_path: str,
         target_seconds: float = 60.0,
-        output_format: str = "mp3",  # mp3
+        output_format: str = "mp3",
         tags: Optional[Dict[str, str]] = None,
     ) -> str:
-        """Ajusta la duración de un audio aumentando velocidad (si es más largo) o rellenando con silencio (si es más corto)."""
+        """
+        Ajusta la duración de un audio usando Rubberband para mantener el tono original.
+        Optimizado para voz hablada con reducciones moderadas (hasta 25%).
+        
+        Si el audio es más largo, lo acelera (time-stretch) manteniendo el pitch.
+        Si es más corto, lo ralentiza (time-stretch) manteniendo el pitch.
+        """
         if not Path(input_path).exists():
             raise FileNotFoundError(f"No se encuentra: {input_path}")
         
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         
         audio = AudioSegment.from_file(input_path)
-        current = audio.duration_seconds
+        current_seconds = audio.duration_seconds
         
-        export_format = output_format
-        export_codec = None
+        if target_seconds <= 0 or current_seconds <= 0:
+            raise ValueError(f"Duración inválida: current={current_seconds}, target={target_seconds}")
 
-        if target_seconds <= 0 or current <= 0:
-            raise ValueError(f"Duración inválida: current={current}, target={target_seconds}")
+        stretch_ratio = target_seconds / current_seconds
+        
+        logger.info(
+            f"adjust_duration: {current_seconds:.2f}s -> {target_seconds:.2f}s "
+            f"({stretch_ratio*100:.1f}%)"
+        )
 
-        target_ms = int(target_seconds * 1000)
-        current_ms = len(audio)
-
-        if abs(current_ms - target_ms) <= 50:
-            audio.export(output_path, format=export_format, codec=export_codec, tags=tags)
+        if abs(current_seconds - target_seconds) <= 0.05:
+            audio.export(output_path, format=output_format, tags=tags)
+            logger.info(f"Sin cambios necesarios")
             return output_path
 
-        if current_ms < target_ms:
-            # Si es más corto, disminuir velocidad en lugar de rellenar con silencio
-            speed_factor = current / target_seconds
-            logger.info(f"Disminuyendo velocidad: {current:.2f}s → {target_seconds:.2f}s (factor: {speed_factor:.3f}x)")
+        logger.info(f"Aplicando Rubberband optimizado para voz...")
+        
+        temp_wav = Path(output_path).parent / f"temp_{Path(input_path).stem}.wav"
+        audio.export(temp_wav, format="wav")
+        
+        try:
+            y, sr = sf.read(str(temp_wav))
+            
+            stretch_ratio = target_seconds / current_seconds
+            
+            y_stretched = pyrb.time_stretch(
+                y, 
+                sr, 
+                stretch_ratio,
+                rbargs={
+                    '--crispness': 6,
+                    '--finer': True,
+                    '--window': 'long',
+                }
+            )
+            
+            temp_stretched_wav = Path(output_path).parent / f"stretched_{Path(input_path).stem}.wav"
+            sf.write(str(temp_stretched_wav), y_stretched, sr)
+            
+            stretched_audio = AudioSegment.from_wav(str(temp_stretched_wav))
+            
+            if abs(stretched_audio.duration_seconds - target_seconds) > 0.01:
+                target_ms = int(target_seconds * 1000)
+                if len(stretched_audio) > target_ms:
+                    stretched_audio = stretched_audio[:target_ms]
+                elif len(stretched_audio) < target_ms:
+                    stretched_audio = stretched_audio + AudioSegment.silent(duration=target_ms - len(stretched_audio))
+            
+            export_format = output_format
+            export_codec = None
+            if output_format == "m4a":
+                export_format = "mp4"
+                export_codec = "aac"
+            
+            stretched_audio.export(output_path, format=export_format, codec=export_codec, tags=tags)
+            
+            try:
+                temp_wav.unlink()
+                temp_stretched_wav.unlink()
+            except:
+                pass
+            
+            logger.info(
+                f"Audio ajustado con Rubberband: {current_seconds:.2f}s -> {stretched_audio.duration_seconds:.2f}s "
+                f"(target: {target_seconds:.2f}s)"
+            )
+            
+        except Exception as e:
+            logger.warning(f"Rubberband fallo, usando speedup: {e}")
+            speed_factor = current_seconds / target_seconds
             audio = audio.speedup(playback_speed=speed_factor)
-            audio.export(output_path, format=export_format, codec=export_codec, tags=tags)
-            return output_path
-
-        # Si es más largo, aumentar velocidad en lugar de recortar
-        speed_factor = current / target_seconds
-        logger.info(f"Aumentando velocidad: {current:.2f}s → {target_seconds:.2f}s (factor: {speed_factor:.3f}x)")
-        audio = audio.speedup(playback_speed=speed_factor)
-        audio.export(output_path, format=export_format, codec=export_codec, tags=tags)
+            audio.export(output_path, format=output_format, tags=tags)
+        
         return output_path

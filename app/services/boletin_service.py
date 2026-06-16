@@ -50,6 +50,7 @@ class BoletinService:
             Returns:
                 Boletin: El boletín creado con sus audios asociados
             """
+            
             # 1. Validar cantidad de audios
             if len(audio_ids) != 30:
                 raise ValueError(
@@ -101,8 +102,8 @@ class BoletinService:
                 else:
                     hour_filename = f"{hour}"
                 
-                hours_path = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Hours/{hour}.mp3"
-                mins_path = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Minutes/{hour_filename}.mp3"
+                hours_path = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Hours/{hour_filename}.mp3"
+                mins_path = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Minutes/{minute + index}.mp3"
                 audio_path = Path(settings.OUTPUT_DIR) / f"generated/{audio_id}.wav"
                 
                 # Rutas de salida
@@ -125,7 +126,8 @@ class BoletinService:
                     audio_paths=[str(hours_path), str(mins_path)],
                     output_path=str(output_path),
                     output_format="mp3",
-                    crossfade_ms=0,
+                    crossfade_ms=50,
+                    silence_thresh=-50,
                 )
                 
                 duration_time_path = AudioMerger.get_duration_seconds(time_path)
@@ -154,13 +156,13 @@ class BoletinService:
                 )
                 
                 # Forzar duración exacta de 60 segundos
-                final_audio = AudioMerger.enforce_duration(
-                    audio_path=final_audio,
-                    output_path=str(final_audio_output_path),
-                    target_seconds=60.0,
-                    output_format="mp3",
-                    tags={"title": title},
-                )
+                # final_audio = AudioMerger.enforce_duration(
+                #     audio_path=final_audio,
+                #     output_path=str(final_audio_output_path),
+                #     target_seconds=60.0,
+                #     output_format="mp3",
+                #     tags={"title": title},
+                # )
                 
                 duracion_final = AudioMerger.get_duration_seconds(final_audio)
                 logger.info(f"Archivo de audio {index}: {duracion_final:.2f}s")

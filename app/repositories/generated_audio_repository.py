@@ -1,4 +1,6 @@
 # app/repositories/generated_audio_repository.py
+from sqlalchemy.orm import joinedload
+
 from app.models.profile_model import Profile
 from sqlmodel import Session, select
 from app.models.generated_audio_model import GeneratedAudio
@@ -164,3 +166,16 @@ class GeneratedAudioRepository:
             logger.info(f"Audio {audio_id} activado")
         else:
             logger.warning(f"Audio {audio_id} no encontrado para activar")
+            
+    def get_by_audio_id_with_relationship(self, audio_id: str):
+        """
+        Obtiene un audio con la relación owner_profile cargada.
+        Retorna un objeto GeneratedAudio con el perfil accesible como .owner_profile
+        """
+        statement = (
+            select(GeneratedAudio)
+            .options(joinedload(GeneratedAudio.owner_profile))
+            .where(GeneratedAudio.audio_id == audio_id, GeneratedAudio.active == True)
+        )
+        result = self.db.exec(statement).unique().first()
+        return result
