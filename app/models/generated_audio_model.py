@@ -28,9 +28,15 @@ class GeneratedAudio(SQLModel, table=True):
     active: bool = Field(default=True)
     character_count: int = Field(default=0)  # Cantidad de caracteres del texto original
     
-    owner_profile: Optional["Profile"] = Relationship(back_populates="owned_audios")
+    owner_profile: Optional["Profile"] = Relationship(
+        back_populates="owned_audios",
+        sa_relationship_kwargs={"foreign_keys": "[GeneratedAudio.profile_id]"}
+    )
     
-    secondary_profile: Optional["Profile"] = Relationship(back_populates="secondary_audios")
+    secondary_profile: Optional["Profile"] = Relationship(
+        back_populates="secondary_audios",
+        sa_relationship_kwargs={"foreign_keys": "[GeneratedAudio.secondary_profile_id]"}
+    )
     
     
     boletines: List["Boletin"] = Relationship(

@@ -23,9 +23,15 @@ class Profile(SQLModel, table=True):
     #Relación: Un Profile tiene muchos GeneratedAudio - nombre más claro
     owned_audios: List["GeneratedAudio"] = Relationship(
         back_populates="owner_profile",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "foreign_keys": "[GeneratedAudio.profile_id]"
+        }
     )
     
     secondary_audios: List["GeneratedAudio"] = Relationship(
-        back_populates="secondary_profile"
+        back_populates="secondary_profile",
+        sa_relationship_kwargs={
+            "foreign_keys": "[GeneratedAudio.secondary_profile_id]"
+        }
     )
