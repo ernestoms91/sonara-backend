@@ -454,7 +454,7 @@ class AudioService:
                     ultima_voz_unica = voz_a_usar
                     profile_id = profile_a_id if voz_a_usar == "A" else profile_b_id
                     
-                    logger.info(f"PROCESANDO MINUTO {i+1}/{cantidad_minutos} - {num_minuto} | Tipo: Unico | Voz: {voz_a_usar}")
+                    logger.info(f"PROCESANDO MINUTO {i+1}/{cantidad_minutos} | Tipo: Unico | Voz: {voz_a_usar}")
                     
                     result = self.generate_and_save(
                         profile_id=profile_id,
@@ -464,7 +464,7 @@ class AudioService:
                     result["speaker"] = f"{voz_a_usar} (unico)"
                     result["tipo"] = "unico"
                 else:
-                    logger.info(f"PROCESANDO MINUTO {i+1}/{cantidad_minutos} - {num_minuto} | Tipo: Dueto | Voz: A/B")
+                    logger.info(f"PROCESANDO MINUTO {i+1}/{cantidad_minutos} | Tipo: Dueto | Voz: A/B")
                     
                     result = self.generate_duet_and_save(
                         profile_a_id=profile_a_id,
@@ -492,7 +492,7 @@ class AudioService:
                 # Limpiar memoria después de cada minuto
                 self.tts_service.empty_cache()
                 
-                logger.info(f"Minuto {num_minuto} completado en {time.time() - minuto_start:.2f}s | Caracteres: {result['character_count']}")
+                logger.info(f"Minuto {i + 1} completado en {time.time() - minuto_start:.2f}s | Caracteres: {result['character_count']}")
                 
                 # LOG DE PROGRESO CADA 5 MINUTOS
                 if (i + 1) % 5 == 0:

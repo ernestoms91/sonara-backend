@@ -15,6 +15,16 @@ logger = get_logger(__name__)
 
 class AudioMerger:
     """Helper para unir archivos de audio usando pydub y Rubberband para estiramiento de tiempo."""
+    
+    @staticmethod
+    def _export_format_and_codec(output_format: str):
+        """Determina el formato de exportación y codec según el formato solicitado."""
+        export_format = output_format
+        export_codec = None
+        if output_format == "m4a":
+            export_format = "mp4"
+            export_codec = "aac"
+        return export_format, export_codec
 
     @staticmethod
     def merge_audio_files(
@@ -263,93 +273,61 @@ class AudioMerger:
         target_seconds: float = 60.0,
         output_format: str = "mp3",
         tags: Optional[Dict[str, str]] = None,
+        tolerance_ms: int = 10,
     ) -> str:
         """
-        Ajusta la duración de un audio usando Rubberband para mantener el tono original.
-        Optimizado para voz hablada con reducciones moderadas (hasta 25%).
-        
-        Si el audio es más largo, lo acelera (time-stretch) manteniendo el pitch.
-        Si es más corto, lo ralentiza (time-stretch) manteniendo el pitch.
+        Ajusta la duración de un audio acelerando o ralentizando uniformemente.
         """
         if not Path(input_path).exists():
             raise FileNotFoundError(f"No se encuentra: {input_path}")
-        
+
+        if target_seconds <= 0:
+            raise ValueError(f"Duración inválida: target={target_seconds}")
+
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        
+
         audio = AudioSegment.from_file(input_path)
         current_seconds = audio.duration_seconds
-        
-        if target_seconds <= 0 or current_seconds <= 0:
-            raise ValueError(f"Duración inválida: current={current_seconds}, target={target_seconds}")
 
-        stretch_ratio = target_seconds / current_seconds
-        
-        logger.info(
-            f"adjust_duration: {current_seconds:.2f}s -> {target_seconds:.2f}s "
-            f"({stretch_ratio*100:.1f}%)"
-        )
+        if current_seconds <= 0:
+            raise ValueError(f"Duración inválida del archivo: {current_seconds}")
 
-        if abs(current_seconds - target_seconds) <= 0.05:
-            audio.export(output_path, format=output_format, tags=tags)
-            logger.info(f"Sin cambios necesarios")
-            return output_path
-
-        logger.info(f"Aplicando Rubberband optimizado para voz...")
-        
-        temp_wav = Path(output_path).parent / f"temp_{Path(input_path).stem}.wav"
-        audio.export(temp_wav, format="wav")
-        
-        try:
-            y, sr = sf.read(str(temp_wav))
-            
-            stretch_ratio = target_seconds / current_seconds
-            
-            y_stretched = pyrb.time_stretch(
-                y, 
-                sr, 
-                stretch_ratio,
-                rbargs={
-                    '--crispness': 6,
-                    '--finer': True,
-                    '--window': 'long',
-                }
-            )
-            
-            temp_stretched_wav = Path(output_path).parent / f"stretched_{Path(input_path).stem}.wav"
-            sf.write(str(temp_stretched_wav), y_stretched, sr)
-            
-            stretched_audio = AudioSegment.from_wav(str(temp_stretched_wav))
-            
-            if abs(stretched_audio.duration_seconds - target_seconds) > 0.01:
-                target_ms = int(target_seconds * 1000)
-                if len(stretched_audio) > target_ms:
-                    stretched_audio = stretched_audio[:target_ms]
-                elif len(stretched_audio) < target_ms:
-                    stretched_audio = stretched_audio + AudioSegment.silent(duration=target_ms - len(stretched_audio))
-            
+        if abs(current_seconds - target_seconds) <= 0.001:
             export_format = output_format
             export_codec = None
             if output_format == "m4a":
                 export_format = "mp4"
                 export_codec = "aac"
-            
-            stretched_audio.export(output_path, format=export_format, codec=export_codec, tags=tags)
-            
-            try:
-                temp_wav.unlink()
-                temp_stretched_wav.unlink()
-            except:
-                pass
-            
-            logger.info(
-                f"Audio ajustado con Rubberband: {current_seconds:.2f}s -> {stretched_audio.duration_seconds:.2f}s "
-                f"(target: {target_seconds:.2f}s)"
-            )
-            
-        except Exception as e:
-            logger.warning(f"Rubberband fallo, usando speedup: {e}")
-            speed_factor = current_seconds / target_seconds
-            audio = audio.speedup(playback_speed=speed_factor)
-            audio.export(output_path, format=output_format, tags=tags)
+            audio.export(output_path, format=export_format, codec=export_codec, tags=tags)
+            return output_path
+
+        speed_factor = current_seconds / target_seconds
         
+        logger.info(
+            f"adjust_duration: {current_seconds:.3f}s -> {target_seconds:.3f}s "
+            f"(speed_factor={speed_factor:.6f}) - {'Acelerando' if speed_factor > 1 else 'Ralentizando'}"
+        )
+
+        #  Usar speedup de Pydub (acelera o ralentiza uniformemente)
+        logger.info(f"Aplicando speedup...")
+        adjusted_audio = audio.speedup(playback_speed=speed_factor)
+
+        # Asegurar duración exacta
+        target_ms = int(round(target_seconds * 1000))
+        if len(adjusted_audio) > target_ms:
+            adjusted_audio = adjusted_audio[:target_ms]
+        elif len(adjusted_audio) < target_ms:
+            adjusted_audio = adjusted_audio + AudioSegment.silent(duration=target_ms - len(adjusted_audio))
+
+        export_format = output_format
+        export_codec = None
+        if output_format == "m4a":
+            export_format = "mp4"
+            export_codec = "aac"
+
+        adjusted_audio.export(output_path, format=export_format, codec=export_codec, tags=tags)
+
+        final_seconds = AudioSegment.from_file(output_path).duration_seconds
+        logger.info(f"Audio ajustado: {current_seconds:.3f}s -> {final_seconds:.3f}s")
+
         return output_path
