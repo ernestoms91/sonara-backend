@@ -31,18 +31,66 @@ class AudioService:
         self.waveforms_base_dir = Path(settings.OUTPUT_DIR) / "waveforms"
 
     # ─── Helpers privados ────────────────────────────────────────────────────
+    
+    def _normalize_text_with_marker(self, text: str) -> str:
+        """
+        Asegura que el texto tenga un marcador [P1] al inicio.
+        SOLO PARA UNA VOZ. Los duetos ya tienen su estructura [P1], [P2], etc.
+        """
+        if not text:
+            return "[P1] Texto vacío"
+        
+        text = text.strip()
+        
+        # Si ya tiene [P1] al inicio, devolver tal cual
+        if re.match(r'^\[P1\]', text, re.IGNORECASE):
+            return text
+        
+        # Si tiene algún marcador [Pn] pero no [P1] al inicio
+        if re.search(r'\[P\d+\]', text):
+            # Reemplazar el primer marcador por [P1]
+            return re.sub(r'\[P\d+\]', '[P1]', text, count=1)
+        
+        # No tiene marcadores, agregar [P1] al inicio
+        return f"[P1] {text}"
+
+    def _clean_text_for_tts(self, text: str) -> str:
+        """
+        Limpia el texto para TTS eliminando marcadores pero manteniendo estructura.
+        """
+        if not text:
+            return ""
+        
+        # Eliminar marcadores [Pn] pero conservar el texto
+        cleaned = re.sub(r'\[P\d+\]\s*', '', text)
+        
+        # Normalizar múltiples saltos de línea
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        
+        # Limpiar líneas vacías
+        lines = [line.strip() for line in cleaned.split('\n')]
+        cleaned = '\n\n'.join(line for line in lines if line)
+        
+        return cleaned
 
     def _extract_first_sentence(self, text: str) -> str:
         if not text:
             return "Audio sin título"
-        clean = text.strip()
+        
+        # Siempre limpiar marcadores, incluso si no los tiene
+        clean = re.sub(r'\[P\d+\]\s*', '', text).strip()
+        
+        if not clean:
+            return "Audio sin título"
+        
         match = re.search(r"(.+?[\.\!\?])(?:\s|$)", clean)
         if match:
             first_sentence = match.group(1).strip()
             if len(first_sentence) > 60:
                 first_sentence = first_sentence[:57] + "..."
             return first_sentence
-        first_line = clean.splitlines()[0].strip()
+        
+        first_line = clean.splitlines()[0].strip() if clean.splitlines() else clean
         if len(first_line) > 60:
             first_line = first_line[:57] + "..."
         return first_line if first_line else "Audio sin título"
@@ -169,7 +217,14 @@ class AudioService:
             raise FileNotFoundError(f"Prompt no encontrado: {prompt_path}")
 
         prompt = self.tts_service.load_prompt(str(prompt_path))
-        text_clean = re.sub(r'\[P\d+\]\s*', '', text).strip()
+        
+        # Normalizar texto: asegurar que tenga [P1] si no lo tiene
+        text_normalizado = self._normalize_text_with_marker(text)
+        
+        # Limpiar texto para TTS (remover marcadores para la síntesis)
+        text_clean = self._clean_text_for_tts(text_normalizado)
+        logger.info(f"Texto para TTS: {text_clean[:100]}...")
+        
         audio_array, sample_rate = self.tts_service.synthesize(prompt, text_clean, language=profile.language)
 
         duration = len(audio_array) / sample_rate
@@ -178,15 +233,19 @@ class AudioService:
         filename = self._save_audio_file(audio_array, sample_rate, audio_uuid)
         waveform_data = self._save_waveform(audio_array, sample_rate, audio_uuid)
 
+        # Extraer título del texto limpio
+        title = self._extract_first_sentence(text_clean)
+        logger.info(f"Título extraído: {title}")
+
         saved_audio = self.audio_repo.create(GeneratedAudio(
             audio_id=audio_uuid,
             profile_id=profile_id,
-            text=text,
+            text=text_normalizado,
             duration=duration,
-            title=self._extract_first_sentence(text),
+            title=title,
             waveform=audio_uuid,
             created_by=created_by,
-            character_count=len(text)
+            character_count=len(text_clean)
         ))
 
         result = {
@@ -195,7 +254,7 @@ class AudioService:
             "audio_bytes": self._to_bytes(audio_array, sample_rate),
             "filename": filename,
             "duration": duration,
-            "character_count": len(text),
+            "character_count": len(text_clean),
             "created_at": saved_audio.created_at,
             "waveform": waveform_data
         }
@@ -345,6 +404,7 @@ class AudioService:
             "profile_name": audio["profile_name"]
         }
 
+
     def generate_boletin_audios(
         self,
         boletin_data: dict,
@@ -368,7 +428,7 @@ class AudioService:
         if cantidad_minutos != 30:
             raise ValueError(f"Se requieren exactamente 30 minutos. Recibidos: {cantidad_minutos}")
         
-        logger.info(f"Iniciando boletín {sigla} - {fecha} - {cantidad_minutos} minutos (TODO O NADA)")
+        logger.info(f"INICIANDO BOLETIN: {sigla} - {fecha} - {cantidad_minutos} minutos")
         
         resultados = []
         audios_generados = []
@@ -379,8 +439,6 @@ class AudioService:
         try:
             for i, (num_minuto, texto) in enumerate(minutos.items()):
                 minuto_start = time.time()
-                
-                logger.info(f"Generando minuto {i + 1}...")
                 
                 # Detectar cuántos párrafos tiene este minuto
                 num_parrafos = len(re.findall(r'\[P\d+\]', texto))
@@ -396,17 +454,18 @@ class AudioService:
                     ultima_voz_unica = voz_a_usar
                     profile_id = profile_a_id if voz_a_usar == "A" else profile_b_id
                     
-                    logger.info(f"Minuto {i + 1} es párrafo único ({num_parrafos} párrafo), usando voz {voz_a_usar}")
+                    logger.info(f"PROCESANDO MINUTO {i+1}/{cantidad_minutos} - {num_minuto} | Tipo: Unico | Voz: {voz_a_usar}")
                     
                     result = self.generate_and_save(
                         profile_id=profile_id,
                         text=texto,
                         created_by=created_by
                     )
-                    result["speaker"] = f"{voz_a_usar} (único)"
+                    result["speaker"] = f"{voz_a_usar} (unico)"
                     result["tipo"] = "unico"
                 else:
-                    # Es dueto normal (múltiples párrafos)
+                    logger.info(f"PROCESANDO MINUTO {i+1}/{cantidad_minutos} - {num_minuto} | Tipo: Dueto | Voz: A/B")
+                    
                     result = self.generate_duet_and_save(
                         profile_a_id=profile_a_id,
                         profile_b_id=profile_b_id,
@@ -433,20 +492,24 @@ class AudioService:
                 # Limpiar memoria después de cada minuto
                 self.tts_service.empty_cache()
                 
-                logger.info(f"Minuto {num_minuto} completado en {time.time() - minuto_start:.2f}s")
+                logger.info(f"Minuto {num_minuto} completado en {time.time() - minuto_start:.2f}s | Caracteres: {result['character_count']}")
+                
+                # LOG DE PROGRESO CADA 5 MINUTOS
+                if (i + 1) % 5 == 0:
+                    porcentaje = ((i + 1) / cantidad_minutos) * 100
+                    logger.info(f"PROGRESO: {i+1}/{cantidad_minutos} minutos ({porcentaje:.0f}%)")
             
-                total_duration = time.time() - start_time
-                total_minutes = total_duration / 60
-
-                #  CALCULAR ESTADÍSTICAS ANTES DE USARLAS 
-                duetos = sum(1 for r in resultados if r["tipo"] == "dueto")
-                unicos = sum(1 for r in resultados if r["tipo"] == "unico")
-                voz_a_unicos = sum(1 for r in resultados if r.get("speaker") == "A (único)")
-                voz_b_unicos = sum(1 for r in resultados if r.get("speaker") == "B (único)")
-
-                # Ahora sí, usar las variables
-                logger.info(f"BOLETÍN COMPLETADO: {duetos} duetos, {unicos} únicos (A:{voz_a_unicos}, B:{voz_b_unicos}) en {total_minutes:.2f} minutos")
-
+            # CALCULAR ESTADÍSTICAS
+            total_duration = time.time() - start_time
+            total_minutes = total_duration / 60
+            
+            duetos = sum(1 for r in resultados if r["tipo"] == "dueto")
+            unicos = sum(1 for r in resultados if r["tipo"] == "unico")
+            voz_a_unicos = sum(1 for r in resultados if r.get("speaker") == "A (unico)")
+            voz_b_unicos = sum(1 for r in resultados if r.get("speaker") == "B (unico)")
+            
+            logger.info(f"BOLETIN COMPLETADO: {cantidad_minutos} minutos | Duetos: {duetos} | Unicos: {unicos} (A:{voz_a_unicos}, B:{voz_b_unicos}) | Tiempo total: {total_minutes:.2f} min")
+            
             return {
                 "total_minutos": cantidad_minutos,
                 "generados": len(resultados),
@@ -465,8 +528,10 @@ class AudioService:
             }
             
         except Exception as e:
-            logger.error(f"BOLETÍN FALLIDO: {str(e)}")
-            logger.info(f"Eliminando {len(audios_generados)} audios generados...")
+            minuto_fallido = i + 1 if 'i' in locals() else '?'
+            
+            logger.error(f"BOLETIN CANCELADO: Error en minuto {minuto_fallido} - {str(e)}")
+            logger.info(f"Limpiando {len(audios_generados)} audios generados...")
             
             for audio_id in audios_generados:
                 try:
@@ -483,4 +548,5 @@ class AudioService:
                 except Exception as cleanup_error:
                     logger.error(f"No se pudo eliminar {audio_id}: {cleanup_error}")
             
+            logger.info(f"Limpieza completada: {len(audios_generados)} audios eliminados")
             raise ValueError(f"Boletín fallido. Se eliminaron {len(audios_generados)} audios. Error original: {str(e)}")
