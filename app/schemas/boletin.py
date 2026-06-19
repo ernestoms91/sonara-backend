@@ -1,6 +1,6 @@
 # app/schemas/boletin.py
 from pydantic import BaseModel, Field, field_validator
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 
 class BoletinCreateRequest(BaseModel):
@@ -44,3 +44,70 @@ class BoletinUpdateRequest(BaseModel):
         if len(set(v)) != len(v):
             raise ValueError("No se permiten IDs duplicados en la lista")
         return v
+    
+class AudioInfoResponse(BaseModel):
+    """Información de un audio dentro de un boletín"""
+    id: int = Field(..., description="ID interno del audio")
+    audio_id: str = Field(..., description="ID único del audio (formato UUID)")
+    text: Optional[str] = Field(None, description="Texto del audio")
+    duration: Optional[float] = Field(None, description="Duración en segundos")
+    created_at: Optional[datetime] = Field(None, description="Fecha de creación del audio")
+    
+    class Config:
+        from_attributes = True 
+
+class BoletinDetailResponse(BaseModel):
+    """Respuesta detallada de un boletín por ID"""
+    id: int = Field(..., description="ID del boletín")
+    start_time: datetime = Field(..., description="Fecha y hora de inicio")
+    created_by: Optional[str] = Field(None, description="Usuario que creó el boletín")
+    created_at: datetime = Field(..., description="Fecha de creación del boletín")
+    updated_at: datetime = Field(..., description="Fecha de última actualización")
+    active: bool = Field(..., description="Estado del boletín")
+    audio_count: int = Field(..., description="Cantidad de audios asociados")
+    audio_ids: List[str] = Field(..., description="IDs de audios en orden")
+    audios: List[AudioInfoResponse] = Field(..., description="Información detallada de los audios")
+    
+    class Config:
+        from_attributes = True
+
+class BoletinListItemResponse(BaseModel):
+    """Respuesta resumida para lista de boletines"""
+    id: int = Field(..., description="ID del boletín")
+    start_time: datetime = Field(..., description="Fecha y hora de inicio")
+    created_by: Optional[str] = Field(None, description="Usuario que creó el boletín")
+    created_at: datetime = Field(..., description="Fecha de creación")
+    updated_at: datetime = Field(..., description="Fecha de última actualización")
+    active: bool = Field(..., description="Estado del boletín")
+    audio_count: int = Field(..., description="Cantidad de audios asociados")
+    audios: Optional[List[AudioInfoResponse]] = Field(None, description="Primeros 5 audios (si se solicita)")
+    
+    class Config:
+        from_attributes = True
+
+class BoletinListResponse(BaseModel):
+    """Respuesta paginada de boletines"""
+    total: int = Field(..., description="Total de boletines que cumplen los filtros")
+    skip: int = Field(..., description="Número de registros saltados")
+    limit: int = Field(..., description="Límite de registros por página")
+    items: List[BoletinListItemResponse] = Field(..., description="Lista de boletines")
+    
+    class Config:
+        from_attributes = True
+
+class BoletinDateRangeResponse(BaseModel):
+    """Respuesta para búsqueda por rango de fechas"""
+    count: int = Field(..., description="Cantidad de boletines encontrados")
+    items: List[dict] = Field(..., description="Lista resumida de boletines")
+    
+    class Config:
+        from_attributes = True
+
+class BoletinSoftDeleteResponse(BaseModel):
+    """Respuesta después de soft delete o activación"""
+    boletin_id: int = Field(..., description="ID del boletín afectado")
+    start_time: datetime = Field(..., description="Fecha y hora del boletín")
+    message: str = Field(..., description="Mensaje de confirmación")
+    
+    class Config:
+        from_attributes = True
