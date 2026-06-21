@@ -18,14 +18,18 @@ class BoletinRepository:
     
     def get_by_id(self, boletin_id: int) -> Optional[Boletin]:
         """
-        Obtener boletín por ID con sus audios incluidos y ordenados
+        Obtener boletín por ID con sus audios incluidos, ordenados y con perfiles cargados
         """
         logger.debug(f"Buscando boletín con ID: {boletin_id}")
         
+        # Cargar el boletín con sus audios y perfiles anidados
         query = select(Boletin).where(
             Boletin.id == boletin_id
         ).options(
             selectinload(Boletin.audios)
+            .selectinload(GeneratedAudio.owner_profile),  # Carga owner_profile.name
+            selectinload(Boletin.audios)
+            .selectinload(GeneratedAudio.secondary_profile)  # Carga secondary_profile.name
         )
         
         boletin = self.db.exec(query).first()
@@ -81,7 +85,7 @@ class BoletinRepository:
         """
         logger.debug(f"Obteniendo boletines paginados: page={page}, size={size}, active_only={active_only}")
         
-        # ✅ Validar y normalizar parámetros
+        # Validar y normalizar parámetros
         page = max(1, page)  # page mínimo 1
         size = max(1, min(size, 100))  # size entre 1 y 100
         
@@ -92,7 +96,7 @@ class BoletinRepository:
             query = query.where(Boletin.active == True)
         
         # Ordenar por fecha de creación descendente
-        query = query.order_by(Boletin.created_at.desc())
+        query = query.order_by(Boletin.start_time.desc())
         
         # Calcular offset
         offset = (page - 1) * size
@@ -122,7 +126,7 @@ class BoletinRepository:
                 "audio_ids": audio_ids
             })
         
-        # ✅ Calcular páginas de forma segura
+        #  Calcular páginas de forma segura
         pages = (total + size - 1) // size if total > 0 else 0
         
         logger.debug(f"Boletines encontrados: {len(items)} de {total} totales, páginas: {pages}")

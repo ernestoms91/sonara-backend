@@ -89,8 +89,10 @@ class BoletinService:
                     "created_at": audio.created_at,
                     "profile_id": audio.profile_id,
                     "secondary_profile_id": audio.secondary_profile_id,
+                    "profile_name": audio.owner_profile.name,
+                    "secondary_profile_name": audio.secondary_profile.name if audio.secondary_profile else None,
                     "waveform": audio.waveform,
-                    "active": audio.active
+                    "active": audio.active                    
                 }
                 for audio in boletin.audios
             ]
@@ -158,10 +160,19 @@ class BoletinService:
         self,
         boletin_id: int,
         new_audio_ids: List[str],
+        new_start_time: Optional[datetime] = None
     ) -> Boletin:
         """
         Actualiza un boletín existente con nuevos audios.
         UNIDAD DE TRABAJO COMPLETA - CON try/except y commit/rollback.
+        
+        - Si cambia la hora: regenera TODO (30 audios con nueva estructura)
+        - Si NO cambia la hora: solo regenera los audios que cambiaron de posición
+        
+        Args:
+            boletin_id: ID del boletín a actualizar
+            new_audio_ids: Lista de 30 nuevos IDs de audios
+            new_start_time: Nueva fecha y hora de inicio (opcional)
         """
         # 1. Validaciones (fuera de la transacción)
         boletin = self.boletin_repo.get_by_id(boletin_id)
@@ -185,21 +196,58 @@ class BoletinService:
                 raise ValueError(f"Audio con ID {audio_id} no encontrado o inactivo")
 
         try:
-            # 2. Procesar actualización de archivos
-            self._process_update_audio_files(boletin, new_audio_ids, current_audio_ids)
+            # 2. Determinar si la hora cambió
+            hora_cambio = False
+            use_new_time = None
+            
+            if new_start_time:
+                # Normalizar la nueva hora (quitar segundos y microsegundos)
+                new_start_time = new_start_time.replace(second=0, microsecond=0)
+                current_time = boletin.start_time
+                
+                # Comparar solo hora y minutos
+                if (current_time.hour != new_start_time.hour or 
+                    current_time.minute != new_start_time.minute):
+                    hora_cambio = True
+                    logger.info(f"Hora cambiada: {current_time.strftime('%H:%M')} -> {new_start_time.strftime('%H:%M')}")
+                    boletin.start_time = new_start_time
+                    self.db.add(boletin)
+                    use_new_time = new_start_time
+                else:
+                    logger.info("Hora sin cambios")
+            else:
+                logger.info("No se proporcionó nueva hora")
 
-            # 3. Actualizar relación en BD
+            # 3. Procesar según el caso
+            if hora_cambio:
+                # ✅ Caso 1: La hora cambió → Regenerar TODO
+                logger.info("Regenerando boletín completo con nueva hora...")
+                self._process_audio_files(use_new_time, new_audio_ids, boletin)
+            else:
+                # Verificar qué audios cambiaron
+                changed_indices = []
+                for i, (current, new) in enumerate(zip(current_audio_ids, new_audio_ids)):
+                    if current != new:
+                        changed_indices.append(i)
+                
+                if changed_indices:
+                    logger.info(f"Audios cambiados en índices: {changed_indices}")
+                    self._process_update_audio_files(boletin, new_audio_ids, current_audio_ids)
+                else:
+                    logger.info("No hay cambios en los audios, solo actualizando hora si fue necesario")
+
+            # 4. Guardar relaciones en BD
             self.boletin_repo.update_boletin_audios(boletin_id, new_audio_ids)
 
-            # 4. COMMIT - Todo funciona
+            # 5. COMMIT - Todo funciona
             self.db.commit()
             logger.info(f"Boletín {boletin_id} actualizado correctamente")
 
-            # 5. Retornar el boletín actualizado
+            # 6. Retornar el boletín actualizado
             return self.boletin_repo.get_by_id(boletin_id)
 
         except Exception as e:
-            # 6. ROLLBACK - Algo falló
+            # 7. ROLLBACK - Algo falló
             self.db.rollback()
             logger.error(f"Error actualizando boletín: {str(e)}")
             raise
@@ -407,13 +455,35 @@ class BoletinService:
         current_audio_ids: List[str]
     ):
         """
-        Procesa la actualización de archivos de audio.
+        Procesa la actualización de archivos de audio con la hora existente.
+        Usa las mismas rutas que _process_audio_files.
         SIN try/except - las excepciones suben al método padre.
         """
-        bol_date = boletin.bol_date
         start_time = boletin.start_time
-        hour = int(start_time.split(":")[0])
-        hour_str = start_time.replace(":", "-")
+        bol_date = start_time.strftime("%Y-%m-%d")
+        hour = start_time.hour
+        minute = start_time.minute
+
+        # Determinar AM/PM para la carpeta
+        if hour == 0:
+            am_pm = "AM"
+            hour_display = "12"
+        elif hour == 12:
+            am_pm = "PM"
+            hour_display = "12"
+        elif hour > 12:
+            am_pm = "PM"
+            hour_display = f"{hour - 12}"
+        else:
+            am_pm = "AM"
+            hour_display = f"{hour}"
+
+        folder_name = f"{hour_display}:{minute:02d} {am_pm}"
+
+        # Crear directorio base si no existe
+        base_boletin_dir = Path(settings.OUTPUT_DIR) / "boletines" / bol_date / folder_name
+        temp_dir = base_boletin_dir / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
 
         for index, new_audio_id in enumerate(new_audio_ids):
             if current_audio_ids[index] == new_audio_id:
@@ -425,88 +495,252 @@ class BoletinService:
             audio_obj = self.audio_repo.get_by_audio_id_with_relationship(new_audio_id)
             folder_id = audio_obj.owner_profile.folder_id
 
-            conector1 = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/conec/Rreloj.m4a"
-            hours_path = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/hours/{hour}.m4a"
-            mins_path = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/min/{index}.m4a"
-            conector2 = f"{settings.OUTPUT_DIR}/profiles/{folder_id}/conec/Minutos.m4a"
-            audio_path = f"{settings.OUTPUT_DIR}/generated/{new_audio_id}.wav"
+            # ✅ Usar las mismas rutas que en _process_audio_files
+            conector_rreloj = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Connectors/rreloj.mp3"
 
-            output_filename = f"{index:02d}.mp3"
-            output_path = f"{settings.OUTPUT_DIR}/boletines/{bol_date}/{hour_str}/temp/{output_filename}"
-            final_audio_output_path = f"{settings.OUTPUT_DIR}/boletines/{bol_date}/{hour_str}/{output_filename}"
+            # Determinar el archivo de hora correcto
+            if hour == 0:
+                if minute == 0 and index == 0:
+                    hour_filename = "12 AM"
+                    usar_minutos = False
+                else:
+                    hour_filename = "12"
+                    usar_minutos = True
+            elif hour == 12:
+                if minute == 0 and index == 0:
+                    hour_filename = "12 PM"
+                    usar_minutos = False
+                else:
+                    hour_filename = "12"
+                    usar_minutos = True
+            elif hour > 12:
+                hour_filename = f"{hour - 12}"
+                usar_minutos = True
+            else:
+                hour_filename = f"{hour}"
+                usar_minutos = True
+
+            hours_path = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Hours/{hour_filename}.mp3"
+            audio_path = Path(settings.OUTPUT_DIR) / f"generated/{new_audio_id}.wav"
+
+            minuto_real = minute + index
+
+            if hour == 0:
+                archivo_am_pm = "AM"
+                archivo_hour = "12"
+            elif hour == 12:
+                archivo_am_pm = "PM"
+                archivo_hour = "12"
+            elif hour > 12:
+                archivo_am_pm = "PM"
+                archivo_hour = f"{hour - 12}"
+            else:
+                archivo_am_pm = "AM"
+                archivo_hour = f"{hour}"
+
+            output_filename = f"{archivo_hour}:{minuto_real:02d} {archivo_am_pm}.mp3"
+            output_path = temp_dir / output_filename
+            final_audio_output_path = base_boletin_dir / output_filename
 
             missing_files = []
-            for file_path in [conector1, hours_path, mins_path, conector2, audio_path]:
+            for file_path in [conector_rreloj, hours_path, audio_path]:
                 if not Path(file_path).exists():
-                    missing_files.append(file_path)
+                    missing_files.append(str(file_path))
+
+            if usar_minutos:
+                mins_path = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Minutes/{minute + index}.mp3"
+                if not mins_path.exists():
+                    missing_files.append(str(mins_path))
+                    logger.warning(f"Faltan archivos para minuto {index}: {missing_files}")
+                    raise FileNotFoundError(f"Archivos faltantes para el minuto {index}: {missing_files}")
+
+                logger.info(f"Minuto {index}: usando hours + minutes ({hour_filename} + {minute + index})")
+                time_path = AudioMerger.merge_audio_files(
+                    audio_paths=[str(hours_path), str(mins_path)],
+                    output_path=str(output_path),
+                    output_format="mp3",
+                    crossfade_ms=50,
+                    silence_thresh=-50,
+                )
+            else:
+                time_path = hours_path
+                logger.info(f"12:00 {'AM' if hour == 0 else 'PM'} en punto (minuto {index}): usando solo archivo de hora")
 
             if missing_files:
                 logger.warning(f"Faltan archivos para minuto {index}: {missing_files}")
                 raise FileNotFoundError(f"Archivos faltantes para el minuto {index}: {missing_files}")
 
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-            time_path = AudioMerger.merge_audio_files(
-                audio_paths=[conector1, hours_path, mins_path, conector2],
-                output_path=output_path,
-                output_format="mp3",
-                crossfade_ms=0,
-            )
-
             duration_time_path = AudioMerger.get_duration_seconds(time_path)
-            remaining_seconds = 60.0 - duration_time_path
+            duration_conector_rreloj = AudioMerger.get_duration(str(conector_rreloj))
+            remaining_seconds = 60.0 - duration_time_path - duration_conector_rreloj
 
             title = self._extract_title(audio_obj.text)
 
-            if remaining_seconds <= 0.0:
-                logger.warning(f"El bloque de tiempo para minuto {index} dura {duration_time_path:.2f}s y no deja espacio para el audio adicional.")
+            output_audios_path = temp_dir / f"{new_audio_id}.mp3"
+            info_path = AudioMerger.adjust_duration(
+                input_path=str(audio_path),
+                output_path=str(output_audios_path),
+                target_seconds=remaining_seconds,
+                output_format="mp3",
+                tags={"title": title},
+            )
 
-                if duration_time_path > 60.0:
-                    time_path = AudioMerger.adjust_duration(
-                        input_path=time_path,
-                        output_path=output_path,
-                        target_seconds=60.0,
-                        output_format="mp3",
-                        tags={"title": title},
-                    )
-
-                final_audio = AudioMerger.merge_audio_files(
-                    audio_paths=[time_path],
-                    output_path=final_audio_output_path,
-                    output_format="mp3",
-                    tags={"title": title},
-                )
-                final_audio = AudioMerger.enforce_duration(
-                    audio_path=final_audio,
-                    output_path=final_audio_output_path,
-                    target_seconds=60.0,
-                    output_format="mp3",
-                    tags={"title": title},
-                )
-            else:
-                output_audios_path = f"{settings.OUTPUT_DIR}/boletines/{bol_date}/{hour_str}/temp/{new_audio_id}.mp3"
-                info_path = AudioMerger.adjust_duration(
-                    input_path=audio_path,
-                    output_path=output_audios_path,
-                    target_seconds=remaining_seconds,
-                    output_format="mp3",
-                    tags={"title": title},
-                )
-
-                final_audio = AudioMerger.concatenate_audio_files(
-                    audio_paths=[time_path, info_path],
-                    output_path=final_audio_output_path,
-                    output_format="mp3",
-                    crossfade_ms=0,
-                    tags={"title": title},
-                )
-                final_audio = AudioMerger.enforce_duration(
-                    audio_path=final_audio,
-                    output_path=final_audio_output_path,
-                    target_seconds=60.0,
-                    output_format="mp3",
-                    tags={"title": title},
-                )
+            final_audio = AudioMerger.concatenate_audio_files(
+                audio_paths=[str(time_path), str(info_path), str(conector_rreloj)],
+                output_path=str(final_audio_output_path),
+                output_format="mp3",
+                crossfade_ms=0,
+                tags={"title": title},
+            )
 
             duracion_final = AudioMerger.get_duration_seconds(final_audio)
-            logger.info(f"Minuto {index} actualizado: {duracion_final:.2f}s")
+            logger.info(f"Archivo de audio {index}: {output_filename} - {duracion_final:.2f}s")
+
+    def _process_update_audio_files_with_new_time(
+        self,
+        boletin: Boletin,
+        new_audio_ids: List[str],
+        current_audio_ids: List[str],
+        new_start_time: datetime
+    ):
+        """
+        Procesa la actualización de archivos de audio con una nueva hora.
+        Usa las mismas rutas que _process_audio_files.
+        SIN try/except - las excepciones suben al método padre.
+        """
+        # Extraer fecha y hora de la nueva start_time
+        bol_date = new_start_time.strftime("%Y-%m-%d")
+        hour = new_start_time.hour
+        minute = new_start_time.minute
+
+        # Determinar AM/PM para la carpeta
+        if hour == 0:
+            am_pm = "AM"
+            hour_display = "12"
+        elif hour == 12:
+            am_pm = "PM"
+            hour_display = "12"
+        elif hour > 12:
+            am_pm = "PM"
+            hour_display = f"{hour - 12}"
+        else:
+            am_pm = "AM"
+            hour_display = f"{hour}"
+
+        folder_name = f"{hour_display}:{minute:02d} {am_pm}"
+
+        # Crear directorio base si no existe
+        base_boletin_dir = Path(settings.OUTPUT_DIR) / "boletines" / bol_date / folder_name
+        temp_dir = base_boletin_dir / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        for index, new_audio_id in enumerate(new_audio_ids):
+            if current_audio_ids[index] == new_audio_id:
+                logger.info(f"Minuto {index}: sin cambios, manteniendo audio existente")
+                continue
+
+            logger.info(f"Minuto {index}: actualizando a {new_audio_id} con nueva hora")
+
+            audio_obj = self.audio_repo.get_by_audio_id_with_relationship(new_audio_id)
+            folder_id = audio_obj.owner_profile.folder_id
+
+            # ✅ Usar las mismas rutas que en _process_audio_files
+            conector_rreloj = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Connectors/rreloj.mp3"
+
+            # Determinar el archivo de hora correcto con la nueva hora
+            if hour == 0:
+                if minute == 0 and index == 0:
+                    hour_filename = "12 AM"
+                    usar_minutos = False
+                else:
+                    hour_filename = "12"
+                    usar_minutos = True
+            elif hour == 12:
+                if minute == 0 and index == 0:
+                    hour_filename = "12 PM"
+                    usar_minutos = False
+                else:
+                    hour_filename = "12"
+                    usar_minutos = True
+            elif hour > 12:
+                hour_filename = f"{hour - 12}"
+                usar_minutos = True
+            else:
+                hour_filename = f"{hour}"
+                usar_minutos = True
+
+            hours_path = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Hours/{hour_filename}.mp3"
+            audio_path = Path(settings.OUTPUT_DIR) / f"generated/{new_audio_id}.wav"
+
+            minuto_real = minute + index
+
+            if hour == 0:
+                archivo_am_pm = "AM"
+                archivo_hour = "12"
+            elif hour == 12:
+                archivo_am_pm = "PM"
+                archivo_hour = "12"
+            elif hour > 12:
+                archivo_am_pm = "PM"
+                archivo_hour = f"{hour - 12}"
+            else:
+                archivo_am_pm = "AM"
+                archivo_hour = f"{hour}"
+
+            output_filename = f"{archivo_hour}:{minuto_real:02d} {archivo_am_pm}.mp3"
+            output_path = temp_dir / output_filename
+            final_audio_output_path = base_boletin_dir / output_filename
+
+            missing_files = []
+            for file_path in [conector_rreloj, hours_path, audio_path]:
+                if not Path(file_path).exists():
+                    missing_files.append(str(file_path))
+
+            if usar_minutos:
+                mins_path = Path(settings.OUTPUT_DIR) / f"profiles/{folder_id}/Minutes/{minute + index}.mp3"
+                if not mins_path.exists():
+                    missing_files.append(str(mins_path))
+                    logger.warning(f"Faltan archivos para minuto {index}: {missing_files}")
+                    raise FileNotFoundError(f"Archivos faltantes para el minuto {index}: {missing_files}")
+
+                logger.info(f"Minuto {index}: usando hours + minutes ({hour_filename} + {minute + index})")
+                time_path = AudioMerger.merge_audio_files(
+                    audio_paths=[str(hours_path), str(mins_path)],
+                    output_path=str(output_path),
+                    output_format="mp3",
+                    crossfade_ms=50,
+                    silence_thresh=-50,
+                )
+            else:
+                time_path = hours_path
+                logger.info(f"12:00 {'AM' if hour == 0 else 'PM'} en punto (minuto {index}): usando solo archivo de hora")
+
+            if missing_files:
+                logger.warning(f"Faltan archivos para minuto {index}: {missing_files}")
+                raise FileNotFoundError(f"Archivos faltantes para el minuto {index}: {missing_files}")
+
+            duration_time_path = AudioMerger.get_duration_seconds(time_path)
+            duration_conector_rreloj = AudioMerger.get_duration(str(conector_rreloj))
+            remaining_seconds = 60.0 - duration_time_path - duration_conector_rreloj
+
+            title = self._extract_title(audio_obj.text)
+
+            output_audios_path = temp_dir / f"{new_audio_id}.mp3"
+            info_path = AudioMerger.adjust_duration(
+                input_path=str(audio_path),
+                output_path=str(output_audios_path),
+                target_seconds=remaining_seconds,
+                output_format="mp3",
+                tags={"title": title},
+            )
+
+            final_audio = AudioMerger.concatenate_audio_files(
+                audio_paths=[str(time_path), str(info_path), str(conector_rreloj)],
+                output_path=str(final_audio_output_path),
+                output_format="mp3",
+                crossfade_ms=0,
+                tags={"title": title},
+            )
+
+            duracion_final = AudioMerger.get_duration_seconds(final_audio)
+            logger.info(f"Archivo de audio {index}: {output_filename} - {duracion_final:.2f}s")

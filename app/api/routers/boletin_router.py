@@ -118,13 +118,14 @@ async def update_boletin(
 ) -> CommonResponse:
     """
     Actualizar un boletín existente con nuevos audios.
-    Solo procesa los minutos donde el audio_id cambió.
+    Opcionalmente se puede actualizar la hora.
     """
     logger.info(f"Recibida solicitud para actualizar boletín ID: {boletin_id}")
 
     result = boletin_service.update(
         boletin_id=boletin_id,
         new_audio_ids=request.audio_ids,
+        new_start_time=request.start_time
     )
 
     return CommonResponse.success(

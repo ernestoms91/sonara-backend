@@ -36,6 +36,7 @@ class BoletinCreateRequest(BaseModel):
 class BoletinUpdateRequest(BaseModel):
     """Schema para actualizar un boletín"""
     audio_ids: List[str] = Field(..., min_length=30, max_length=30, description="Lista de 30 IDs de audios")
+    start_time: datetime = Field(..., description="Nueva fecha y hora de inicio (opcional)")
     
     @field_validator("audio_ids")
     @classmethod
@@ -43,6 +44,17 @@ class BoletinUpdateRequest(BaseModel):
         """Validar que no haya duplicados"""
         if len(set(v)) != len(v):
             raise ValueError("No se permiten IDs duplicados en la lista")
+        return v
+    
+    @field_validator("start_time")
+    @classmethod
+    def validate_start_time(cls, v: Optional[datetime]) -> Optional[datetime]:
+        """Validar minutos 00 o 30 si se envía start_time"""
+        if v is not None:
+            if v.minute not in [0, 30]:
+                raise ValueError(f"Los minutos deben ser 00 o 30. Recibido: {v.minute:02d}")
+            if v.second != 0 or v.microsecond != 0:
+                v = v.replace(second=0, microsecond=0)
         return v
     
 class AudioInfoResponse(BaseModel):
