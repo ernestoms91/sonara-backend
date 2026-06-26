@@ -136,7 +136,7 @@ def value_error_handler(request: Request, exc: ValueError):
     
     Status code: 400 Bad Request
     """
-    logger.info(
+    logger.warning(
         f"Error de negocio | {request.method} {request.url.path} | {exc}"
     )
     

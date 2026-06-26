@@ -7,9 +7,6 @@ from app.schemas.audio import (
     GenerateAudioRequest,
     GenerateDuetRequest,
     ChangeDurationRequest,
-    AudioDataResponse,
-    DuetAudioDataResponse,
-    DurationChangedResponse
 )
 from app.schemas.common import CommonResponse
 from app.core.logging import get_logger
@@ -33,19 +30,13 @@ async def generate_audio(
 ) -> CommonResponse:
     """
     Genera un audio usando la voz clonada del perfil.
+    
+    El servicio devuelve un objeto AudioDataResponse completo con todos los campos.
     """
-    result = audio_service.generate_and_save(
+    response_data = audio_service.generate_and_save(
         profile_id=profile_id,
         text=request.text,
         created_by=current_user.full_name
-    )
-
-    response_data = AudioDataResponse(
-        audio_id=result["audio_id"],
-        duration=result["duration"],
-        character_count=result.get("character_count", 0),
-        filename=result["filename"],
-        created_at=result.get("created_at")
     )
 
     return CommonResponse.success(
@@ -77,28 +68,21 @@ async def generate_duet_audio(
     Reglas de asignación:
     - Párrafos impares ([P1], [P3], [P5]...) → Voz del perfil A
     - Párrafos pares ([P2], [P4], [P6]...) → Voz del perfil B
+    
+    El servicio devuelve un objeto DuetAudioDataResponse completo con todos los campos.
     """
-    result = audio_service.generate_duet_and_save(
+    response_data = audio_service.generate_duet_and_save(
         profile_a_id=profile_a_id,
         profile_b_id=profile_b_id,
         text_with_markers=request.text,
         created_by=current_user.full_name
     )
 
-    response_data = DuetAudioDataResponse(
-        audio_id=result["audio_id"],
-        duration=result["duration"],
-        character_count=result.get("character_count", 0),
-        filename=result["filename"],
-        created_at=result.get("created_at"),
-        profile_a=result["profile_a"],
-        profile_b=result["profile_b"]
-    )
-
     return CommonResponse.success(
         message="Duet audio generated successfully",
         data=response_data.model_dump(mode="json")
     )
+
 
 @router.get(
     "/all",
@@ -224,6 +208,7 @@ async def activate_audio(
         }
     )
 
+
 @router.post(
     "/generate-boletin",
     response_model=CommonResponse,
@@ -253,5 +238,33 @@ async def generate_boletin_audios(
     
     return CommonResponse.success(
         message=f"Boletín procesado: {result['generados']} de {result['total_minutos']} audios generados",
+        data=result
+    )
+
+
+@router.post(
+    "/change-duration/{audio_id}",
+    response_model=CommonResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Cambiar la duración de un audio",
+    description="Aplica time-stretch al audio para alcanzar la duración deseada",
+)
+async def change_duration(
+    current_user: CurrentUser,
+    audio_service: AudioServiceDep,
+    request: ChangeDurationRequest,
+    audio_id: str = Path(..., description="ID del audio a modificar"),
+) -> CommonResponse:
+    """
+    Cambia la duración de un audio usando time-stretch.
+    """
+    # TODO: Implementar cambio de duración en el servicio
+    result = audio_service.change_duration(
+        audio_id=audio_id,
+        target_duration=request.target_duration
+    )
+    
+    return CommonResponse.success(
+        message="Duration changed successfully",
         data=result
     )
