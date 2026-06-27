@@ -18,7 +18,7 @@ from app.models.generated_audio_model import GeneratedAudio
 from app.repositories.generated_audio_repository import GeneratedAudioRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.services.tts_service import TTSService
-from app.schemas.audio import AudioDataResponse, DuetAudioDataResponse
+from app.schemas.audio import AudioDataResponse
 
 logger = get_logger(__name__)
 
@@ -268,7 +268,7 @@ class AudioService:
         profile_b_id: int,
         text_with_markers: str,
         created_by: str
-    ) -> DuetAudioDataResponse:
+    ) -> AudioDataResponse:
         """
         Genera un audio dueto y retorna un objeto DuetAudioDataResponse.
         """
@@ -341,7 +341,7 @@ class AudioService:
         ))
 
         #  Devolver objeto Pydantic en lugar de dict
-        response = DuetAudioDataResponse(
+        response = AudioDataResponse(
             id=saved_audio.id,
             audio_id=UUID(saved_audio.audio_id),
             profile_id=saved_audio.profile_id,

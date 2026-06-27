@@ -104,30 +104,7 @@ class AudioDataResponse(BaseModel):
     character_count: int = 0
     profile_name: Optional[str] = None
     secondary_profile_name: Optional[str] = None
-    audio_url: Optional[str] = None
-    waveform_url: Optional[str] = None
 
-
-class DuetAudioDataResponse(BaseModel):
-    """Respuesta para un audio dueto generado"""
-    id: int
-    audio_id: UUID
-    profile_id: int  # Perfil A
-    secondary_profile_id: Optional[int] = None  # Perfil B
-    text: str
-    title: Optional[str] = None
-    duration: float
-    waveform: Optional[str] = None
-    created_by: Optional[str] = None
-    created_at: Optional[datetime] = None
-    active: bool = True
-    character_count: int = 0   
-    profile_a: str  # Nombre del perfil A
-    profile_b: str  # Nombre del perfil B
-    profile_name: Optional[str] = None  # Para consistencia con AudioListItemResponse
-    secondary_profile_name: Optional[str] = None
-    audio_url: Optional[str] = None
-    waveform_url: Optional[str] = None
 
 
 class DurationChangedResponse(BaseModel):
