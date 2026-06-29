@@ -1,4 +1,6 @@
 # app/schemas/profile.py
+from typing import Optional
+
 from pydantic import BaseModel
 from datetime import datetime
 from sqlmodel import Field, SQLModel
@@ -11,10 +13,16 @@ class ProfileCreate(SQLModel):
     
 class ProfileResponse(BaseModel):
     id: int
+    folder_id: str
     name: str
-    language: str
-    active: bool
-    created_at: datetime
+    language: Optional[str] = None
+    ref_text: Optional[str] = None
+    model_type: Optional[str] = None
+    active: bool = True
+    connectors_ready: bool = False
+    hours_ready: bool = False
+    minutes_ready: bool = False
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

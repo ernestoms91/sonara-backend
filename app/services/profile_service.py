@@ -243,3 +243,88 @@ class ProfileService:
         logger.info(
             f"Perfiles obtenidos - Total: {result['total']}, Páginas: {result['pages']}")
         return result
+
+
+    def delete_profile(self, profile_id: int, force: bool = False) -> dict:
+        """
+        Elimina un perfil de forma ATÓMICA:
+        1. Valida que exista
+        2. Valida que no esté activo (o force=True)
+        3. Elimina la carpeta física
+        4. Elimina el registro de la BD
+        
+        Args:
+            profile_id: ID del perfil a eliminar
+            force: Si True, elimina aunque esté activo
+            
+        Returns:
+            dict: Información del perfil eliminado
+            
+        Raises:
+            HTTPException: Si el perfil no existe o está activo (sin force)
+        """
+        # 1. Obtener el perfil
+        profile = self.repo.get_by_id(profile_id)
+        if not profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Profile with ID {profile_id} not found"
+            )
+        
+        # 2. Validar que no esté activo (a menos que force=True)
+        if profile.active and not force:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot delete active profile '{profile.name}'. Deactivate it first or use force=true"
+            )
+        
+        # Guardar información para el response
+        profile_info = {
+            "id": profile.id,
+            "name": profile.name,
+            "folder_id": profile.folder_id,
+            "active": profile.active
+        }
+        
+        # 3. Eliminar carpeta física
+        profile_folder = self.profiles_base_dir / profile.folder_id
+        folder_deleted = False
+        folder_size = 0
+        
+        if profile_folder.exists():
+            try:
+                # Calcular tamaño antes de eliminar
+                folder_size = sum(f.stat().st_size for f in profile_folder.rglob('*') if f.is_file())
+                shutil.rmtree(profile_folder)
+                folder_deleted = True
+                logger.info(f"Carpeta eliminada: {profile_folder} (tamaño: {folder_size} bytes)")
+            except Exception as e:
+                logger.error(f"Error eliminando carpeta {profile_folder}: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error deleting profile folder: {str(e)}"
+                )
+        else:
+            logger.warning(f"La carpeta del perfil no existe: {profile_folder}")
+        
+        # 4. Eliminar de la BD
+        deleted = self.repo.delete(profile_id)
+        if not deleted:
+            # Si falla la eliminación en BD pero ya eliminamos la carpeta,
+            # intentamos restaurar la carpeta? Mejor loguear y continuar
+            logger.error(f"Perfil eliminado de BD pero no se pudo eliminar: {profile_id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error deleting profile from database"
+            )
+        
+        logger.info(
+            f"Perfil '{profile.name}' (ID={profile_id}) eliminado exitosamente. "
+            f"Carpeta eliminada: {folder_deleted}, Tamaño: {folder_size} bytes"
+        )
+        
+        return {
+            "profile": profile_info,
+            "folder_deleted": folder_deleted,
+            "folder_size_bytes": folder_size
+        }

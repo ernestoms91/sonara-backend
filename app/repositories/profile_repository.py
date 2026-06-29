@@ -101,3 +101,21 @@ class ProfileRepository:
             "size": result.size,
             "pages": result.pages
         }
+        
+    def delete(self, profile_id: int) -> bool:
+        """
+        Elimina un perfil de la base de datos por su ID.
+        
+        Args:
+            profile_id: ID del perfil a eliminar
+            
+        Returns:
+            bool: True si se eliminó, False si no existía
+        """
+        profile = self.db.get(Profile, profile_id)
+        if not profile:
+            return False
+        
+        self.db.delete(profile)
+        self.db.commit()
+        return True   
