@@ -7,7 +7,7 @@ import bcrypt
 from app.core.config import settings
 
 # ============================================
-# JWT usando tu Settings
+# JWT - ACCESS TOKEN
 # ============================================
 def create_access_token(
     user_id: int, 
@@ -54,6 +54,66 @@ def validate_token_and_password_version(token: str, current_password_version: in
         return False
     
     return payload.get("password_version") == current_password_version
+
+
+# ============================================
+# JWT - REFRESH TOKEN
+# ============================================
+def create_refresh_token(user_id: int, username: str, password_version: int) -> str:
+    """
+    Crea un refresh token con expiración larga.
+    """
+    payload = {
+        "sub": str(user_id),
+        "username": username,
+        "password_version": password_version,
+        "exp": datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        "iat": datetime.now(timezone.utc),
+        "type": "refresh"
+    }
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALG)
+
+
+def validate_refresh_token(token: str, current_password_version: int) -> bool:
+    """
+    Valida un refresh token.
+    """
+    payload = decode_token(token)
+    if not payload:
+        return False
+    
+    if payload.get("type") != "refresh":
+        return False
+    
+    return payload.get("password_version") == current_password_version
+
+
+def refresh_access_token(refresh_token: str) -> Optional[str]:
+    """
+    Genera un nuevo access token a partir de un refresh token válido.
+    """
+    payload = decode_token(refresh_token)
+    
+    if not payload:
+        return None
+    
+    if payload.get("type") != "refresh":
+        return None
+    
+    user_id = payload.get("sub")
+    username = payload.get("username")
+    password_version = payload.get("password_version")
+    is_admin = payload.get("is_admin", False)
+    
+    if not user_id or not username:
+        return None
+    
+    return create_access_token(
+        user_id=int(user_id),
+        username=username,
+        password_version=password_version,
+        is_admin=is_admin
+    )
 
 
 # ============================================

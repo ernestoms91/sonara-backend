@@ -11,10 +11,11 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET: str = Field(..., env="JWT_SECRET", min_length=32)
     JWT_ALG: str = Field(default="HS256", env="JWT_ALG")
-    JWT_EXPIRES_MIN: int = Field(default=1440, env="JWT_EXPIRES_MIN")
+    JWT_EXPIRES_MIN: int = Field(default=15, env="JWT_EXPIRES_MIN")
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, env="REFRESH_TOKEN_EXPIRE_DAYS")
     
     # API
-    PROJECT_NAME: str =  Field(..., env="PROJECT_NAME")
+    PROJECT_NAME: str = Field(..., env="PROJECT_NAME")
 
     # TTS MODELS
     MODEL_PATH: str = Field(..., env="MODEL_PATH")
@@ -24,7 +25,7 @@ class Settings(BaseSettings):
     # OUTPUT
     OUTPUT_DIR: str = Field(default="files", env="OUTPUT_DIR")
     
-    #LOGGING
+    # LOGGING
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
     
     # ESPECTRO DE AUDIO
@@ -34,6 +35,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+
 
 try:
     settings = Settings()
@@ -46,7 +48,7 @@ try:
     
     # Validar device
     if settings.DEVICE not in ["cpu", "cuda", "mps"]:
-        logging.critical(f"Device no válido: {settings.DEVICE}. Usar: cpu, cuda")
+        logging.critical(f"Device no válido: {settings.DEVICE}. Usar: cpu, cuda, mps")
         sys.exit(1)
 
     # Crear carpeta de salida si no existe
@@ -60,14 +62,14 @@ try:
     logging.info(f"Carpeta de perfiles: {profiles_path.absolute()}")
     
     # Crear subcarpeta para audios generados dentro de OUTPUT_DIR
-    genereated_path = output_path / "generated"
-    genereated_path.mkdir(parents=True, exist_ok=True)
-    logging.info(f"Carpeta de perfiles: {genereated_path.absolute()}")
+    generated_path = output_path / "generated"
+    generated_path.mkdir(parents=True, exist_ok=True)
+    logging.info(f"Carpeta de audios generados: {generated_path.absolute()}")
 
     # Crear subcarpeta para waveform dentro de OUTPUT_DIR
     waveform_path = output_path / "waveforms"
     waveform_path.mkdir(parents=True, exist_ok=True)
-    logging.info(f"Carpeta de waveform: {waveform_path.absolute()}")
+    logging.info(f"Carpeta de waveforms: {waveform_path.absolute()}")
 
 except Exception as e:
     logging.critical(f"Error de configuración: {e}")

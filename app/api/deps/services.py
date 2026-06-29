@@ -9,6 +9,7 @@ from app.services.profile_service import ProfileService
 from app.services.tts_service import TTSService
 from app.api.deps.db import DBSession
 from app.api.deps.model import ModelDep
+from app.services.user_service import UserService
 
 
 def get_tts_service(
@@ -48,3 +49,8 @@ def get_auth_service(session: DBSession) -> AuthService:
     return AuthService(session)
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+
+def get_user_service(session: DBSession) -> UserService:
+    return UserService(session)
+
+UserServiceDep = Annotated[UserService, Depends(get_user_service)]

@@ -2,7 +2,7 @@
 from sqlmodel import Session, select
 from typing import Optional, List, Tuple
 from sqlalchemy import func
-from app.models.user import User
+from app.models.user_model import User
 from typing import Optional
 from datetime import datetime, timezone
 

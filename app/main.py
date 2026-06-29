@@ -16,6 +16,7 @@ from app.api.routers.auth_router import router as auth_router
 from app.api.routers.info_router import router as info_router
 from app.api.routers.boletin_router import router as boletin_router
 from app.api.routers.profile_router import router as profile_router
+from app.api.routers.user_router import router as user_router
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.model import TTSModel
@@ -96,6 +97,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(boletin_router, prefix="/api/v1")
 app.include_router(info_router, prefix="/api/v1")
 app.include_router(profile_router, prefix="/api/v1")
+app.include_router(user_router, prefix="/api/v1")
 
 
 logger.info(f"API {settings.PROJECT_NAME} configurada correctamente")

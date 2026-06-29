@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from app.core.database import get_engine
 from app.core.security import hash_password
 from sqlmodel import Session, select
-from app.models.user import User
+from app.models.user_model import User
 
 def crear_admin():
     engine = get_engine()

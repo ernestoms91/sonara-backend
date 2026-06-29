@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlmodel import select
 from app.api.deps.db import DBSession
-from app.models.user import User
+from app.models.user_model import User
 from app.core.security import decode_token, validate_token_and_password_version
 
 security = HTTPBearer(auto_error=False)

@@ -1,4 +1,4 @@
-# app/models/user.py
+# app/models/user_model.py
 from sqlmodel import SQLModel, Field
 from datetime import datetime, timezone
 from typing import Optional
